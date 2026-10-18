@@ -842,6 +842,7 @@ async function loadProjects() {
 async function renderProjects() {
   const body = $("#projects-body");
 
+  if (pendingImport) return renderImportPreview(body);
   if (state.project) return renderProjectDetail(body);
 
   $("#tag-row").innerHTML = projectCache.tags
@@ -866,6 +867,105 @@ async function renderProjects() {
     </article>`).join("")}</div>`;
 }
 
+/* --- export / import / MakerWorld -------------------------------------- */
+
+// The chosen archive stays in memory between the preview and the real import.
+let pendingImport = null;
+
+async function postZip(file, params) {
+  const r = await fetch(`/api/import?${new URLSearchParams({ ...params, name: file.name })}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/zip" },
+    body: file,
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+  return data;
+}
+
+function renderImportPreview(body) {
+  const { file, plan, result } = pendingImport;
+  const rows = (result || plan).projects.map((p) => {
+    const what = result
+      ? (p.imported ? (p.action === "copy" ? `imported as ${p.slug}` : "imported") : p.action === "failed" ? `failed: ${p.error}` : "skipped (already here)")
+      : (p.action === "new" ? "new" : "already here");
+    return `<div class="row"><div class="row-main"><div class="row-name">${esc(p.name)}</div>
+      <div class="row-sub">${p.items} item${p.items === 1 ? "" : "s"} · ${p.files} file${p.files === 1 ? "" : "s"} · ${fmtBytes(p.bytes)}</div></div>
+      <span class="pill" data-status="${p.action === "new" || p.imported ? "approved" : p.action === "failed" ? "rejected" : "pending"}">${esc(what)}</span></div>`;
+  }).join("");
+  const existing = plan.projects.filter((p) => p.action !== "new").length;
+  body.innerHTML = `
+    <div class="detail-title">${result ? "Import finished" : "Import preview"}</div>
+    <p class="tiny">${esc(file.name)} · ${esc(plan.format)}${plan.exportedAt ? ` · exported ${esc(fmtWhen(plan.exportedAt))}` : ""}</p>
+    <div class="rows">${rows}</div>
+    <div class="project-actions">
+      ${result ? `<button type="button" class="go" data-import-cancel>Done</button>` : `
+        <button type="button" class="ghost-btn" data-import-cancel>Cancel</button>
+        ${existing ? `<button type="button" class="ghost-btn" data-import-mode="copy">Import all (copy ${existing} existing)</button>` : ""}
+        <button type="button" class="go" data-import-mode="skip">${existing ? "Import new only" : "Import"}</button>`}
+    </div>
+    <p class="tiny">Nothing already here is ever overwritten: existing projects are skipped, or imported again under a new name.</p>`;
+}
+
+async function runImport(mode) {
+  const { file } = pendingImport;
+  const body = $("#projects-body");
+  for (const b of body.querySelectorAll("button")) b.disabled = true;
+  try {
+    pendingImport.result = await postZip(file, { mode });
+    await loadProjects();
+  } catch (err) { setNote(String(err.message)); pendingImport = null; await loadProjects(); }
+}
+
+$("#import-btn").addEventListener("click", () => $("#import-file").click());
+$("#import-file").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  state.project = null;
+  $("#projects-body").innerHTML = `<p class="empty">Reading ${esc(file.name)}…</p>`;
+  try {
+    pendingImport = { file, plan: await postZip(file, { dryRun: "1" }) };
+  } catch (err) {
+    pendingImport = null;
+    $("#projects-body").innerHTML = `<p class="empty">Import failed: ${esc(err.message)}</p>`;
+    return;
+  }
+  renderProjects();
+});
+
+// Kept outside the DOM: the project view re-renders on every status update.
+const mwState = { busy: "", slug: "", note: "" };
+
+async function downloadMakerworld(_btn, slug) {
+  if (mwState.busy) return;
+  Object.assign(mwState, { busy: slug, slug, note: "Rendering previews and packing files…" });
+  renderProjects();
+  try {
+    const r = await fetch(`/api/projects/${encodeURIComponent(slug)}/makerworld`);
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      mwState.note = d.error || `HTTP ${r.status}`;
+      return;
+    }
+    const name = (r.headers.get("Content-Disposition") || "").match(/filename="([^"]+)"/)?.[1] || `makerworld-${slug}.zip`;
+    const url = URL.createObjectURL(await r.blob());
+    const a = Object.assign(document.createElement("a"), { href: url, download: name });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    const warnings = decodeURIComponent(r.headers.get("X-Warnings") || "");
+    mwState.note = `Saved ${name}. Open it, follow UPLOAD.md and upload on makerworld.com while signed in.` +
+      (warnings ? ` Check: ${warnings}` : "");
+  } catch (err) {
+    mwState.note = String(err.message || err);
+  } finally {
+    mwState.busy = "";
+    renderProjects();
+  }
+}
+
 async function openProject(slug) {
   state.project = await api(`/api/projects/${encodeURIComponent(slug)}`);
   state.item = null;
@@ -885,6 +985,12 @@ function renderProjectDetail(body) {
       ${p.tags.length ? `<div class="tag-row">${p.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}
     </div>
     ${p.notes ? `<p class="card-notes" style="margin-top:10px">${esc(p.notes)}</p>` : ""}
+    <div class="project-actions">
+      <a class="ghost-btn" href="/api/export?projects=${encodeURIComponent(p.slug)}" download>Export</a>
+      <button type="button" class="ghost-btn" data-makerworld="${esc(p.slug)}" ${mwState.busy === p.slug ? "disabled" : ""}>${mwState.busy === p.slug ? "Preparing…" : "MakerWorld package"}</button>
+      <a class="ghost-btn" href="https://makerworld.com/" target="_blank" rel="noopener noreferrer">Open MakerWorld ↗</a>
+    </div>
+    ${mwState.slug === p.slug && mwState.note ? `<p class="tiny" id="makerworld-note">${esc(mwState.note)}</p>` : ""}
 
     <div class="section-title"><span class="k">items</span></div>
     ${p.items.length ? `<div class="rows">${p.items.map((it) => {
@@ -1141,10 +1247,13 @@ async function loadHistory() {
 /* --- delegated clicks -------------------------------------------------- */
 
 document.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-project],[data-back],[data-item],[data-review],[data-enqueue],[data-release],[data-remove],[data-up],[data-tag],[data-outcome]");
+  const t = e.target.closest("[data-project],[data-back],[data-item],[data-review],[data-enqueue],[data-release],[data-remove],[data-up],[data-tag],[data-outcome],[data-makerworld],[data-import-mode],[data-import-cancel]");
   if (!t) return;
 
   try {
+    if (t.dataset.makerworld) return downloadMakerworld(t, t.dataset.makerworld);
+    if (t.dataset.importMode) return runImport(t.dataset.importMode);
+    if (t.dataset.importCancel !== undefined) { pendingImport = null; return renderProjects(); }
     if (t.dataset.tag !== undefined) {
       state.tag = state.tag === t.dataset.tag ? "" : t.dataset.tag;
       return loadProjects();

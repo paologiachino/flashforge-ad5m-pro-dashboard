@@ -421,6 +421,12 @@ body[data-view="review"] .review-facts { order: -1; }
   outline: none;
 }
 #project-search:focus { border-color: #5a3220; }
+.project-tools { display: flex; gap: 8px; align-items: stretch; }
+.project-tools #project-search { flex: 1; min-width: 0; }
+.project-tools .ghost-btn { display: inline-flex; align-items: center; white-space: nowrap; text-decoration: none; }
+.project-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 6px; }
+.project-actions .ghost-btn, .project-actions button { text-decoration: none; display: inline-flex; align-items: center; }
+#makerworld-note { overflow-wrap: anywhere; }
 
 /* --- settings ---------------------------------------------------------- */
 

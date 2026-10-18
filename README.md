@@ -46,6 +46,13 @@ This project is a fork of [ethanj2k/ai-3d-print](https://github.com/ethanj2k/ai-
   `run-dashboard.sh` and a LaunchAgent installer.
 - **Updated skills** for the 5M Pro: ABS/ASA allowed with the enclosure closed, automatic
   profile selection.
+- **Bulk export / import of projects.** One ZIP with every project, item, revision, note,
+  tag and print record plus all project files. Import shows a preview first and never
+  overwrites anything. A plain ZIP of STL/SCAD files is accepted too.
+- **MakerWorld package.** One click builds everything a MakerWorld upload needs (models,
+  OpenSCAD source, rendered previews, your photos, a draft listing and an upload
+  checklist). You upload it on makerworld.com, signed in to your own account; see
+  [Publishing to MakerWorld](#publishing-to-makerworld).
 
 ## Quick start (macOS)
 
@@ -76,7 +83,7 @@ a fixed IP address in your router.
 | Tab | Contents |
 | --- | --- |
 | **Print** | Status, temperatures, layer-by-layer progress, toolpath preview, camera. |
-| **Projects** | Projects and parts, with the STL to rotate in 3D and *Approve* / *Revise* buttons. |
+| **Projects** | Projects and parts, with the STL to rotate in 3D and *Approve* / *Revise* buttons. *Export all* / *Import…*, and per project *Export* and *MakerWorld package*. |
 | **Queue** | Print queue: nothing starts until you press *Bed clear – release*. |
 | **History** | Past prints, duration, filament used and cost. |
 | **Settings** | Printer connection, model and camera. |
@@ -122,6 +129,51 @@ The environment variables `PRINTER_IP`, `PRINTER_SERIAL`, `PRINTER_CHECKCODE` an
 | POST | `/api/settings` | Save. Localhost only, unless `allowRemoteSettings` is set. |
 | POST | `/api/settings/test` | Test the connection with the form values. |
 | POST | `/api/settings/discover` | Look for printers on port 8898 on the local network. |
+| GET | `/api/export` | ZIP of all projects. `?projects=a,b` for some, `&gcode=0` to leave G-code out. |
+| POST | `/api/import` | Body: the ZIP. `?mode=skip` (default) or `copy`, `&dryRun=1` to preview. Localhost only, unless `allowRemoteSettings`. |
+| GET | `/api/projects/<slug>/makerworld` | MakerWorld upload package (ZIP). |
+
+## Export and import
+
+**Export all** (or **Export** on one project) downloads a ZIP:
+
+```
+manifest.json                  projects, items, revisions, notes, tags and print history
+projects/<slug>/…              every file in the project folder
+projects/<slug>/_external/…    revision files that lived outside it
+```
+
+**Import…** reads the ZIP and shows a preview first. Projects that already exist (same
+name) are either skipped or imported again under a new name (`<slug>-2`): **nothing is
+ever overwritten**. A ZIP without `manifest.json` also works: each top-level folder becomes
+a project, and files sharing a name (`hook.stl`, `hook.scad`) become one item. Paths that
+try to leave the projects folder (`../`, absolute paths) are ignored.
+
+Use it to back up the library, move it to another computer, or bring in a folder of
+downloaded models.
+
+## Publishing to MakerWorld
+
+MakerWorld has **no public upload API**, and its user agreement is reported to prohibit
+robots and other automated access. So the dashboard does not log in to MakerWorld and never handles your
+Bambu Lab password, token or 2-step code. Instead, **MakerWorld package** on a project
+builds:
+
+| File | Contents |
+| --- | --- |
+| `LISTING.md` | Draft title, summary, description, part list, slicer settings, tags. |
+| `UPLOAD.md` | Step-by-step upload checklist and any warnings (unapproved revision, no images). |
+| `models/*.stl` | The approved (or latest) revision of every part. |
+| `source/*.scad` | The OpenSCAD source, to attach if you want to share it. |
+| `images/*.png` | 1600×1200 renders of each part; photos found in the project folder go in `images/photos/`. |
+
+Then **Open MakerWorld**, sign in with your own Bambu Lab account and upload the files,
+copying the text from `LISTING.md`. MakerWorld print profiles are made in Bambu Studio for
+Bambu Lab printers, so for a Flashforge-only model the slicer settings go in the
+description. Only publish your own designs, and credit the original for remixes.
+
+If Bambu Lab grants official API access (their Trust Center collaboration programme), a
+direct upload with proper OAuth sign-in could be added later.
 
 ## Using it with other printers
 

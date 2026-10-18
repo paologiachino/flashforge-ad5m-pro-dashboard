@@ -28,6 +28,7 @@ if (Number(process.versions.node.split(".")[0]) < 22) {
   process.exit(1);
 }
 const { openDb, slugify, now } = await import("./db.js");
+const { exportProjects, importProjects, makerworldPackage } = await import("./projects-io.js");
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = join(ROOT, "public");
@@ -764,6 +765,71 @@ on("PATCH", /^\/api\/projects\/(\d+)$/, async (req, res, m) => {
   const p = db.updateProject(Number(m[1]), b);
   broadcast();
   json(res, 200, p);
+});
+
+// --- export / import / MakerWorld --------------------------------------------
+
+function readRaw(req, limit = 1024 ** 3) {
+  return new Promise((ok, bad) => {
+    const parts = [];
+    let n = 0;
+    req.on("data", (c) => {
+      n += c.length;
+      if (n > limit) { req.destroy(); bad(new Error("upload too large (1 GB max)")); return; }
+      parts.push(c);
+    });
+    req.on("end", () => ok(Buffer.concat(parts)));
+    req.on("error", bad);
+  });
+}
+
+const zipHeaders = (filename) => ({
+  "Content-Disposition": `attachment; filename="${filename.replace(/[^\w.-]/g, "_")}"`,
+});
+
+// ?projects=slug1,slug2 (default: all)  &gcode=0 to leave G-code out
+on("GET", /^\/api\/export$/, (req, res, _m, url) => {
+  const slugs = (url.searchParams.get("projects") || "").split(",").map((s) => s.trim()).filter(Boolean);
+  let out;
+  try { out = exportProjects(db, { slugs, gcode: url.searchParams.get("gcode") !== "0" }); }
+  catch (e) { return json(res, 400, { error: e.message }); }
+  console.log(`export: ${out.projects} project(s), ${out.files} file(s), ${(out.zip.length / 1e6).toFixed(1)} MB`);
+  send(res, 200, "application/zip", out.zip, { headers: zipHeaders(out.filename) });
+});
+
+// Body: the ZIP. ?mode=skip|copy  &dryRun=1 to preview  &name=<original file name>
+on("POST", /^\/api\/import$/, async (req, res, _m, url) => {
+  if (!canEditSettings(req)) return json(res, 403, { error: "import from a browser on the computer that runs the dashboard" });
+  let buf;
+  try { buf = await readRaw(req); }
+  catch (e) { return json(res, 413, { error: e.message }); }
+  try {
+    const out = importProjects(db, CFG, buf, {
+      mode: url.searchParams.get("mode") || "skip",
+      dryRun: url.searchParams.get("dryRun") === "1",
+      archiveName: url.searchParams.get("name") || "",
+    });
+    if (!out.dryRun) {
+      const done = out.projects.filter((p) => p.imported).length;
+      console.log(`import: ${done} project(s) imported, ${out.projects.length - done} skipped or failed`);
+      broadcast();
+    }
+    json(res, 200, out);
+  } catch (e) { json(res, 400, { error: e.message }); }
+});
+
+const OPENSCAD = process.env.OPENSCAD_BIN || ["/opt/homebrew/bin/openscad", "/usr/local/bin/openscad",
+  "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD", "/usr/bin/openscad"].find((p) => existsSync(p)) || "";
+
+on("GET", /^\/api\/projects\/([^/]+)\/makerworld$/, (req, res, m) => {
+  let out;
+  try {
+    out = makerworldPackage(db, CFG, decodeURIComponent(m[1]), { openscad: OPENSCAD, printerModel: modelName() });
+  } catch (e) { return json(res, 400, { error: e.message }); }
+  console.log(`makerworld package: ${m[1]} (${out.parts} part(s), ${out.images} image(s))`);
+  send(res, 200, "application/zip", out.zip, {
+    headers: { ...zipHeaders(out.filename), "X-Warnings": encodeURIComponent(out.warnings.join(" | ")) },
+  });
 });
 
 // --- items -----------------------------------------------------------------

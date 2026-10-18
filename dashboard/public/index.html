@@ -164,7 +164,12 @@
   <!-- PROJECTS ---------------------------------------------------------- -->
   <section class="view view-projects pane">
     <div class="pane-head">
-      <input type="search" id="project-search" placeholder="search projects, items, tags" autocomplete="off">
+      <div class="field-row project-tools">
+        <input type="search" id="project-search" placeholder="search projects, items, tags" autocomplete="off">
+        <a class="ghost-btn" id="export-all" href="/api/export" download>Export all</a>
+        <button type="button" class="ghost-btn" id="import-btn">Import…</button>
+        <input type="file" id="import-file" accept=".zip,application/zip" hidden>
+      </div>
       <div class="tag-row" id="tag-row"></div>
     </div>
     <div class="pane-body" id="projects-body"></div>

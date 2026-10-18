@@ -255,6 +255,15 @@ launchctl bootout gui/$(id -u)/com.print3d.dashboard        # disable
 > (`Operation not permitted`). The installer finds Node 22 and writes its path into the
 > agent file.
 
+### Backup, moving and MakerWorld
+
+- **Projects → Export all** downloads a ZIP of every project (database records and files).
+  Keep it as a backup, or use **Import…** on another computer: a preview shows what will be
+  added, and existing projects are skipped or copied under a new name, never overwritten.
+- **Project → MakerWorld package** builds models, source, renders and a draft listing for a
+  manual upload on makerworld.com. The dashboard never signs in to MakerWorld; see the
+  README for why.
+
 ### Access
 
 - from the Mac: `http://127.0.0.1:3470`
