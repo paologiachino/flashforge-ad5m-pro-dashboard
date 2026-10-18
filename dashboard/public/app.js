@@ -1035,6 +1035,12 @@ async function projectEditClick(t) {
   const p = state.project;
   const imgUrl = (id) => `/api/projects/${encodeURIComponent(p.slug)}/images/${id}`;
   if (t.dataset.tagRemove !== undefined) return saveProject({ tags: p.tags.filter((x) => x !== t.dataset.tagRemove) });
+  if (t.dataset.editName !== undefined) {
+    const name = await ask("Project title", "e.g. Shoe horn with hook", p.name);
+    const clean = (name || "").replace(/\s+/g, " ").trim();
+    if (clean && clean !== p.name) return saveProject({ name: clean });
+    return;
+  }
   if (t.dataset.editNotes !== undefined) {
     const notes = await ask("Project description", "what it is, what it is for, how it fits", p.notes || "");
     if (notes !== null) return saveProject({ notes });
@@ -1084,7 +1090,10 @@ function renderProjectDetail(body) {
     <button type="button" class="back-link" data-back="projects">← all projects</button>
     <div class="detail-head" style="margin-top:14px">
       <div>
-        <div class="detail-title">${esc(p.name)}</div>
+        <div class="title-row">
+          <div class="detail-title">${esc(p.name)}</div>
+          <button type="button" class="ghost-btn" data-edit-name>Rename</button>
+        </div>
         <div class="detail-dir">${esc(p.dir)}</div>
       </div>
     </div>
@@ -1380,11 +1389,11 @@ async function loadHistory() {
 /* --- delegated clicks -------------------------------------------------- */
 
 document.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-project],[data-back],[data-item],[data-review],[data-enqueue],[data-release],[data-remove],[data-up],[data-tag],[data-outcome],[data-makerworld],[data-import-mode],[data-import-cancel],[data-tag-remove],[data-edit-notes],[data-image-add],[data-image-delete],[data-image-caption],[data-image-cover],[data-image-move]");
+  const t = e.target.closest("[data-project],[data-back],[data-item],[data-review],[data-enqueue],[data-release],[data-remove],[data-up],[data-tag],[data-outcome],[data-makerworld],[data-import-mode],[data-import-cancel],[data-tag-remove],[data-edit-name],[data-edit-notes],[data-image-add],[data-image-delete],[data-image-caption],[data-image-cover],[data-image-move]");
   if (!t || t.disabled) return;
 
   try {
-    if (t.matches("[data-tag-remove],[data-edit-notes],[data-image-add],[data-image-delete],[data-image-caption],[data-image-cover],[data-image-move]")) {
+    if (t.matches("[data-tag-remove],[data-edit-name],[data-edit-notes],[data-image-add],[data-image-delete],[data-image-caption],[data-image-cover],[data-image-move]")) {
       return await projectEditClick(t);
     }
     if (t.dataset.makerworld) return downloadMakerworld(t, t.dataset.makerworld);

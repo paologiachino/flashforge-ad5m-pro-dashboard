@@ -504,17 +504,17 @@ body[data-view="review"] .review-facts { order: -1; }
 .tag-x:hover { color: var(--bad); }
 .tag-add { display: inline-flex; gap: 6px; }
 .tag-add input {
-  width: 140px;
+  width: 160px;
+  min-height: 40px;
   font-family: var(--mono);
-  font-size: 12px;
-  padding: 6px 8px;
+  font-size: 13px;
+  padding: 8px 10px;
   color: var(--ink);
   background: #0e1014;
   border: 1px solid var(--line);
   outline: none;
 }
 .tag-add input:focus { border-color: #5a3220; }
-.tag-editor .ghost-btn { padding: 6px 10px; }
 .bad { color: var(--bad) !important; }
 
 .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
@@ -552,7 +552,25 @@ body[data-view="review"] .review-facts { order: -1; }
 }
 .shot-actions button:hover:not(:disabled) { border-color: var(--muted); }
 .shot-actions button:disabled { opacity: 0.3; cursor: default; }
-.section-title .ghost-btn { padding: 6px 10px; }
+/* Action buttons: one readable size everywhere on the Projects pages. */
+.project-tools .ghost-btn,
+.project-actions .ghost-btn,
+.project-actions button,
+.section-title .ghost-btn,
+.tag-editor .ghost-btn,
+.title-row .ghost-btn {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  padding: 10px 16px;
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.section-title { align-items: center; }
+.title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
 
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
 .card {
@@ -714,6 +732,9 @@ body[data-view="review"] .review-facts { order: -1; }
   /* Out of the review bar's way — nothing else occupies the bottom in review mode. */
   .back-btn { top: auto; bottom: 12px; left: 12px; }
   .pane-body { padding: 16px 14px 40px; }
+  .project-tools { flex-wrap: wrap; }
+  .project-tools #project-search { flex: 1 1 100%; }
+  .project-tools .ghost-btn { flex: 1; }
   .pane-head { padding: 14px; }
   .cards { grid-template-columns: 1fr; }
   .row { grid-template-columns: 1fr; gap: 8px; }

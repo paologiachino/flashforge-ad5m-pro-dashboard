@@ -778,8 +778,9 @@ on("PATCH", /^\/api\/projects\/(\d+)$/, async (req, res, m) => {
   try {
     if (b.tags !== undefined) patch.tags = cleanTags(b.tags);
     if (b.name !== undefined) {
-      patch.name = String(b.name).trim();
+      patch.name = String(b.name).replace(/\s+/g, " ").trim();
       if (!patch.name) throw new Error("name cannot be empty");
+      if (patch.name.length > 120) throw new Error("name too long (120 characters max)");
     }
     if (b.notes !== undefined) patch.notes = String(b.notes).slice(0, 20000);
     if (b.status !== undefined) {

@@ -48,7 +48,8 @@ This project is a fork of [ethanj2k/ai-3d-print](https://github.com/ethanj2k/ai-
   profile selection.
 - **Project images and editable tags.** Add any number of photos to a project (from the
   Mac or straight from a phone), reorder them, pick the cover, caption or delete them. Add,
-  remove and edit project tags and the description from the dashboard.
+  remove and edit project tags, and rename the project or edit its description, from the
+  dashboard.
 - **Bulk export / import of projects.** One ZIP with every project, item, revision, note,
   tag, image and print record plus all project files. Import shows a preview first and never
   overwrites anything. A plain ZIP of STL/SCAD files is accepted too.
@@ -135,7 +136,7 @@ The environment variables `PRINTER_IP`, `PRINTER_SERIAL`, `PRINTER_CHECKCODE` an
 | GET | `/api/export` | ZIP of all projects. `?projects=a,b` for some, `&gcode=0` to leave G-code out. |
 | POST | `/api/import` | Body: the ZIP. `?mode=skip` (default) or `copy`, `&dryRun=1` to preview. Localhost only, unless `allowRemoteSettings`. |
 | GET | `/api/projects/<slug>/makerworld` | MakerWorld upload package (ZIP). |
-| PATCH | `/api/projects/<id>` | `{ tags, notes, name, status }`. Tags are lower-cased, max 30, 40 characters each. |
+| PATCH | `/api/projects/<id>` | `{ name, tags, notes, status }`. Name max 120 characters (the folder name does not change). Tags are lower-cased, max 30, 40 characters each. |
 | POST | `/api/projects/<slug>/images` | Body: the image (JPEG, PNG, WebP, GIF; 25 MB max). `?name=&caption=`. |
 | GET · PATCH · DELETE | `/api/projects/<slug>/images/<id>` | The image file; `{ caption }`; delete (also removes the file). |
 | POST | `/api/projects/<slug>/images/order` | `{ ids }` in the new order; the first is the cover. |
