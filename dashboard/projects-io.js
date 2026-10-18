@@ -120,6 +120,10 @@ export function exportProjects(db, { slugs = [], gcode = true } = {}) {
       createdAt: p.created_at,
       updatedAt: p.updated_at,
       tags: db.tagsFor("project", p.id),
+      // In display order; the first is the cover.
+      images: db.images(p.id)
+        .map((img) => ({ file: archived(join(p.dir, "images", img.file)), caption: img.caption, createdAt: img.created_at }))
+        .filter((img) => img.file),
       noteLog: db.all(
         "SELECT body, author, created_at AS createdAt FROM notes WHERE project_id = ? AND item_id IS NULL ORDER BY created_at", p.id),
       items,
@@ -152,6 +156,17 @@ function manifestFromLooseFiles(files, fallbackName) {
   const projects = [];
   for (const [name, list] of groups) {
     const slug = slugify(name);
+    // Pictures in a plain archive become the project's images, in name order.
+    const images = [];
+    for (const f of list.filter((x) => IMAGE_EXT.includes(extname(x.rel).toLowerCase()))
+      .sort((a, b) => a.rel.localeCompare(b.rel))) {
+      let file = basename(f.rel);
+      for (let n = 2; images.some((i) => i.file === `projects/${slug}/images/${file}`); n++) {
+        file = `${basename(f.rel, extname(f.rel))}-${n}${extname(f.rel)}`;
+      }
+      f.rel = `images/${file}`;
+      images.push({ file: `projects/${slug}/${f.rel}`, caption: "" });
+    }
     const stems = new Map();
     for (const f of list) {
       const ext = extname(f.rel).toLowerCase();
@@ -167,6 +182,7 @@ function manifestFromLooseFiles(files, fallbackName) {
       name,
       notes: "",
       tags: [],
+      images,
       items: [...stems].filter(([, s]) => s.stl || s.scad || s.gcode).map(([stem, s]) => ({
         slug: slugify(stem),
         name: stem,
@@ -255,6 +271,13 @@ export function importProjects(db, cfg, buf, { mode = "skip", dryRun = false, ar
         const proj = db.createProject({ name: p.name, slug: p.slug, dir, notes: String(mp.notes || ""), tags: mp.tags || [] });
         db.run("UPDATE projects SET status = ?, created_at = COALESCE(?, created_at), updated_at = COALESCE(?, updated_at) WHERE id = ?",
           mp.status === "archived" ? "archived" : "active", mp.createdAt || null, mp.updatedAt || null, proj.id);
+        // Only files that landed in <dir>/images/ can be project images.
+        for (const im of mp.images || []) {
+          const dest = remap(im.file);
+          if (!dest || !inside(join(dir, "images"), dest) || dirname(dest) !== join(dir, "images")) continue;
+          if (!IMAGE_EXT.includes(extname(dest).toLowerCase())) continue;
+          db.addImage(proj.id, basename(dest), String(im.caption || "").slice(0, 500), im.createdAt || null);
+        }
         for (const n of mp.noteLog || []) {
           db.run("INSERT INTO notes (project_id, body, author, created_at) VALUES (?, ?, ?, ?)",
             proj.id, String(n.body || ""), String(n.author || "user"), n.createdAt || new Date().toISOString());
@@ -337,6 +360,18 @@ export function makerworldPackage(db, cfg, slug, { openscad = "", printerModel =
   const work = mkdtempSync(join(tmpdir(), "makerworld-"));
   const rendered = [];
   const warnings = [];
+
+  // The project's own pictures come first, in the order set in the dashboard:
+  // the first is the cover. Real photos sell a model far better than renders.
+  const photos = [];
+  for (const img of db.images(p.id)) {
+    const f = join(p.dir, "images", img.file);
+    if (!inside(join(p.dir, "images"), f) || !existsSync(f)) { warnings.push(`image ${img.file} is missing`); continue; }
+    const n = String(photos.length + 1).padStart(2, "0");
+    entries.push({ name: `images/${n}-${img.file}`, data: readFileSync(f) });
+    photos.push({ name: `images/${n}-${img.file}`, caption: img.caption });
+  }
+
   for (const { it, rev } of chosen) {
     if (!existsSync(rev.stl_path)) { warnings.push(`${it.name}: STL file missing`); continue; }
     entries.push({ name: `models/${it.slug}.stl`, data: readFileSync(rev.stl_path) });
@@ -346,18 +381,14 @@ export function makerworldPackage(db, cfg, slug, { openscad = "", printerModel =
     if (openscad) {
       const png = join(work, `${it.slug}.png`);
       if (render(openscad, rev.stl_path, png)) {
-        entries.push({ name: `images/${String(rendered.length + 1).padStart(2, "0")}-${it.slug}.png`, data: readFileSync(png) });
+        entries.push({ name: `images/renders/${String(rendered.length + 1).padStart(2, "0")}-${it.slug}.png`, data: readFileSync(png) });
         rendered.push(it.name);
       } else warnings.push(`${it.name}: preview render failed`);
     }
     if (rev.decision !== "approved") warnings.push(`${it.name}: revision v${rev.rev} is not approved yet`);
   }
-  // Real photos of the printed part sell a model far better than renders.
-  for (const f of walk(p.dir).filter((f) => IMAGE_EXT.includes(extname(f.path).toLowerCase()))) {
-    entries.push({ name: `images/photos/${basename(f.path)}`, data: readFileSync(f.path) });
-  }
   rmSync(work, { recursive: true, force: true });
-  if (!entries.some((e) => e.name.startsWith("images/"))) warnings.push("no images: add at least one photo of the printed part");
+  if (!photos.length) warnings.push("no photos: add at least one picture of the printed part in the dashboard (Images)");
 
   const tags = [...new Set([...p.tags, "openscad", "flashforge"])];
   const rows = chosen.map(({ it, rev }) =>
@@ -390,6 +421,12 @@ ${rows.join("\n")}
 ## Tags
 ${tags.join(", ")}
 
+## Images (in this order)
+${photos.length
+    ? photos.map((ph, i) => `${i + 1}. \`${ph.name}\`${i === 0 ? " — cover" : ""}${ph.caption ? ` — ${ph.caption}` : ""}`).join("\n")
+    : "(no photos yet — add them in the dashboard)"}
+${rendered.length ? `\nRenders (optional, after the photos): \`images/renders/\`` : ""}
+
 ## Category
 (choose on MakerWorld)
 
@@ -402,10 +439,11 @@ ${tags.join(", ")}
    (your password and 2-step code stay on makerworld.com; this dashboard never sees them).
 2. Click **Upload** and choose to upload model files.
 3. Files: add everything in \`models/\` (and \`source/\` as attachments if the form allows it).
-4. Images: add \`images/\` — put a real photo of the printed part first if you have one.
+4. Images: add the files in \`images/\` in their numbered order (01 is the cover), then
+   the renders in \`images/renders/\` if you want them.
 5. Copy title, summary, description, tags from \`LISTING.md\`. Pick category and licence.
 6. Print profile: MakerWorld print profiles are made with Bambu Studio for Bambu Lab
-   printers. For a Flashforge-only model, publish the model files and keep the tested
+   printers. For a Flashforge-only model, publish the model files and keep the slicer
    settings in the description.
 7. Only publish your own designs. If a part is a remix, credit and link the original and
    respect its licence.

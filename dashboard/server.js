@@ -10,7 +10,7 @@
 import http from "node:http";
 import {
   readFileSync, existsSync, statSync, readdirSync, watch,
-  mkdirSync, copyFileSync, writeFileSync, chmodSync,
+  mkdirSync, copyFileSync, writeFileSync, chmodSync, rmSync,
 } from "node:fs";
 import { createConnection } from "node:net";
 import { join, dirname, basename, extname, resolve, sep } from "node:path";
@@ -754,17 +754,137 @@ on("GET", /^\/api\/projects\/([^/]+)$/, (req, res, m) => {
   if (!p) return json(res, 404, { error: "no such project" });
   json(res, 200, {
     ...p,
+    images: imagesOf(p),
     items: db.itemsOf(p.id),
     prints: db.prints({ projectId: p.id, limit: 30 }),
     notes: db.all("SELECT * FROM notes WHERE project_id = ? ORDER BY created_at DESC", p.id),
   });
 });
 
+// Tags are stored lower-case; keep them short and few so they stay useful.
+function cleanTags(list) {
+  if (!Array.isArray(list)) throw new Error("tags must be a list");
+  const out = [...new Set(list.map((t) => String(t).trim().toLowerCase().replace(/\s+/g, " ")).filter(Boolean))];
+  if (out.length > 30) throw new Error("at most 30 tags");
+  const long = out.find((t) => t.length > 40);
+  if (long) throw new Error(`tag too long: "${long.slice(0, 20)}…" (40 characters max)`);
+  return out;
+}
+
 on("PATCH", /^\/api\/projects\/(\d+)$/, async (req, res, m) => {
   const b = await readJson(req);
-  const p = db.updateProject(Number(m[1]), b);
+  if (!db.project(Number(m[1]))) return json(res, 404, { error: "no such project" });
+  const patch = {};
+  try {
+    if (b.tags !== undefined) patch.tags = cleanTags(b.tags);
+    if (b.name !== undefined) {
+      patch.name = String(b.name).trim();
+      if (!patch.name) throw new Error("name cannot be empty");
+    }
+    if (b.notes !== undefined) patch.notes = String(b.notes).slice(0, 20000);
+    if (b.status !== undefined) {
+      if (!["active", "archived"].includes(b.status)) throw new Error("status must be active or archived");
+      patch.status = b.status;
+    }
+  } catch (e) { return json(res, 400, { error: e.message }); }
+  const p = db.updateProject(Number(m[1]), patch);
   broadcast();
   json(res, 200, p);
+});
+
+// --- project images ----------------------------------------------------------
+//
+// Uploaded from any browser on the LAN (a phone next to the printer is the
+// usual camera). Stored as <project dir>/images/<name>, typed by content, not
+// by the name the browser sends.
+
+const IMAGE_TYPES = [
+  { ext: ".jpg", mime: "image/jpeg", test: (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
+  { ext: ".png", mime: "image/png", test: (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) },
+  { ext: ".webp", mime: "image/webp", test: (b) => b.toString("latin1", 0, 4) === "RIFF" && b.toString("latin1", 8, 12) === "WEBP" },
+  { ext: ".gif", mime: "image/gif", test: (b) => b.toString("latin1", 0, 4) === "GIF8" },
+];
+const imageType = (buf) => IMAGE_TYPES.find((t) => buf.length > 12 && t.test(buf)) || null;
+const MAX_IMAGE = 25 * 1024 * 1024;
+
+const imagePath = (p, img) => join(p.dir, "images", img.file);
+const inside = (root, f) => { const r = resolve(root); const a = resolve(f); return a.startsWith(r + sep); };
+
+function imagesOf(p) {
+  return db.images(p.id).map((img) => {
+    let size = null;
+    try { size = statSync(imagePath(p, img)).size; } catch { /* file missing */ }
+    return { ...img, size, missing: size === null, url: `/api/projects/${encodeURIComponent(p.slug)}/images/${img.id}` };
+  });
+}
+
+function projectAndImage(m) {
+  const p = db.project(decodeURIComponent(m[1]));
+  if (!p) return {};
+  const img = m[2] ? db.image(Number(m[2])) : null;
+  return { p, img: img && img.project_id === p.id ? img : null };
+}
+
+// Body: the image. ?name=<original file name>&caption=<text>
+on("POST", /^\/api\/projects\/([^/]+)\/images$/, async (req, res, m, url) => {
+  const { p } = projectAndImage(m);
+  if (!p) return json(res, 404, { error: "no such project" });
+  let buf;
+  try { buf = await readRaw(req, MAX_IMAGE); }
+  catch { return json(res, 413, { error: "image too large (25 MB max)" }); }
+  const type = imageType(buf);
+  if (!type) return json(res, 415, { error: "only JPEG, PNG, WebP and GIF images are accepted" });
+
+  const dir = join(p.dir, "images");
+  mkdirSync(dir, { recursive: true });
+  const stem = slugify(basename(String(url.searchParams.get("name") || "photo"), extname(String(url.searchParams.get("name") || "")))) || "photo";
+  let file = `${stem}${type.ext}`;
+  for (let n = 2; existsSync(join(dir, file)); n++) file = `${stem}-${n}${type.ext}`;
+  writeFileSync(join(dir, file), buf);
+  const img = db.addImage(p.id, file, String(url.searchParams.get("caption") || "").slice(0, 500));
+  console.log(`image added: ${p.slug}/images/${file} (${(buf.length / 1e6).toFixed(1)} MB)`);
+  broadcast();
+  json(res, 200, { image: img, images: imagesOf(p) });
+});
+
+on("GET", /^\/api\/projects\/([^/]+)\/images\/(\d+)$/, (req, res, m) => {
+  const { p, img } = projectAndImage(m);
+  if (!img) return json(res, 404, { error: "no such image" });
+  const file = imagePath(p, img);
+  if (!inside(join(p.dir, "images"), file) || !existsSync(file)) return json(res, 404, { error: "image file missing" });
+  const buf = readFileSync(file);
+  send(res, 200, imageType(buf)?.mime || "application/octet-stream", buf, { cache: "private, max-age=3600" });
+});
+
+on("PATCH", /^\/api\/projects\/([^/]+)\/images\/(\d+)$/, async (req, res, m) => {
+  const { p, img } = projectAndImage(m);
+  if (!img) return json(res, 404, { error: "no such image" });
+  const b = await readJson(req);
+  db.updateImage(img.id, { caption: b.caption === undefined ? undefined : String(b.caption).slice(0, 500) });
+  broadcast();
+  json(res, 200, { images: imagesOf(p) });
+});
+
+on("DELETE", /^\/api\/projects\/([^/]+)\/images\/(\d+)$/, (req, res, m) => {
+  const { p, img } = projectAndImage(m);
+  if (!img) return json(res, 404, { error: "no such image" });
+  db.removeImage(img.id);
+  const file = imagePath(p, img);
+  if (inside(join(p.dir, "images"), file)) rmSync(file, { force: true });
+  console.log(`image removed: ${p.slug}/images/${img.file}`);
+  broadcast();
+  json(res, 200, { images: imagesOf(p) });
+});
+
+// Body: { ids: [...] } in the new order; the first is the cover.
+on("POST", /^\/api\/projects\/([^/]+)\/images\/order$/, async (req, res, m) => {
+  const { p } = projectAndImage(m);
+  if (!p) return json(res, 404, { error: "no such project" });
+  const b = await readJson(req);
+  if (!Array.isArray(b.ids)) return json(res, 400, { error: "ids required" });
+  db.reorderImages(p.id, b.ids.map(Number));
+  broadcast();
+  json(res, 200, { images: imagesOf(p) });
 });
 
 // --- export / import / MakerWorld --------------------------------------------

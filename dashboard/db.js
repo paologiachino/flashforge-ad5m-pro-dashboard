@@ -117,7 +117,20 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );
 
+-- Photos and pictures of a project, in display order. The first one is the
+-- cover. Files live in <project dir>/images/.
+CREATE TABLE IF NOT EXISTS project_images (
+  id          INTEGER PRIMARY KEY,
+  project_id  INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  file        TEXT NOT NULL,
+  caption     TEXT NOT NULL DEFAULT '',
+  position    INTEGER NOT NULL,
+  created_at  TEXT NOT NULL,
+  UNIQUE (project_id, file)
+);
+
 CREATE INDEX IF NOT EXISTS idx_items_project  ON items(project_id);
+CREATE INDEX IF NOT EXISTS idx_images_project ON project_images(project_id, position);
 CREATE INDEX IF NOT EXISTS idx_rev_item       ON revisions(item_id);
 CREATE INDEX IF NOT EXISTS idx_queue_position ON queue(position);
 CREATE INDEX IF NOT EXISTS idx_prints_started ON prints(started_at DESC);
@@ -250,6 +263,49 @@ class Store {
 
   touchProject(id) {
     this.run("UPDATE projects SET updated_at = ? WHERE id = ?", now(), id);
+  }
+
+  // --- project images ----------------------------------------------------
+
+  images(projectId) {
+    return this.all("SELECT * FROM project_images WHERE project_id = ? ORDER BY position, id", projectId);
+  }
+
+  image(id) {
+    return this.get("SELECT * FROM project_images WHERE id = ?", Number(id));
+  }
+
+  addImage(projectId, file, caption = "", createdAt = null) {
+    const last = this.get("SELECT MAX(position) AS m FROM project_images WHERE project_id = ?", projectId);
+    const r = this.run(
+      "INSERT INTO project_images (project_id, file, caption, position, created_at) VALUES (?, ?, ?, ?, ?)",
+      projectId, file, caption, (last?.m ?? -1) + 1, createdAt || now(),
+    );
+    this.touchProject(projectId);
+    return this.image(Number(r.lastInsertRowid));
+  }
+
+  updateImage(id, { caption }) {
+    if (caption !== undefined) this.run("UPDATE project_images SET caption = ? WHERE id = ?", caption, id);
+    return this.image(id);
+  }
+
+  removeImage(id) {
+    const img = this.image(id);
+    if (!img) return null;
+    this.run("DELETE FROM project_images WHERE id = ?", id);
+    this.reorderImages(img.project_id, this.images(img.project_id).map((i) => i.id));
+    return img;
+  }
+
+  // ids in the new order; any image left out keeps its place after them.
+  reorderImages(projectId, ids) {
+    const rest = this.images(projectId).map((i) => i.id).filter((id) => !ids.includes(id));
+    [...ids, ...rest].forEach((id, pos) => {
+      this.run("UPDATE project_images SET position = ? WHERE id = ? AND project_id = ?", pos, id, projectId);
+    });
+    this.touchProject(projectId);
+    return this.images(projectId);
   }
 
   // --- items and revisions ----------------------------------------------

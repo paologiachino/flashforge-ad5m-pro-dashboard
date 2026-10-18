@@ -46,11 +46,14 @@ This project is a fork of [ethanj2k/ai-3d-print](https://github.com/ethanj2k/ai-
   `run-dashboard.sh` and a LaunchAgent installer.
 - **Updated skills** for the 5M Pro: ABS/ASA allowed with the enclosure closed, automatic
   profile selection.
+- **Project images and editable tags.** Add any number of photos to a project (from the
+  Mac or straight from a phone), reorder them, pick the cover, caption or delete them. Add,
+  remove and edit project tags and the description from the dashboard.
 - **Bulk export / import of projects.** One ZIP with every project, item, revision, note,
-  tag and print record plus all project files. Import shows a preview first and never
+  tag, image and print record plus all project files. Import shows a preview first and never
   overwrites anything. A plain ZIP of STL/SCAD files is accepted too.
 - **MakerWorld package.** One click builds everything a MakerWorld upload needs (models,
-  OpenSCAD source, rendered previews, your photos, a draft listing and an upload
+  OpenSCAD source, your photos in cover-first order, rendered previews, a draft listing and an upload
   checklist). You upload it on makerworld.com, signed in to your own account; see
   [Publishing to MakerWorld](#publishing-to-makerworld).
 
@@ -83,7 +86,7 @@ a fixed IP address in your router.
 | Tab | Contents |
 | --- | --- |
 | **Print** | Status, temperatures, layer-by-layer progress, toolpath preview, camera. |
-| **Projects** | Projects and parts, with the STL to rotate in 3D and *Approve* / *Revise* buttons. *Export all* / *Import…*, and per project *Export* and *MakerWorld package*. |
+| **Projects** | Projects and parts, with the STL to rotate in 3D and *Approve* / *Revise* buttons. *Export all* / *Import…*; per project: tags, description, images, *Export* and *MakerWorld package*. |
 | **Queue** | Print queue: nothing starts until you press *Bed clear – release*. |
 | **History** | Past prints, duration, filament used and cost. |
 | **Settings** | Printer connection, model and camera. |
@@ -132,21 +135,26 @@ The environment variables `PRINTER_IP`, `PRINTER_SERIAL`, `PRINTER_CHECKCODE` an
 | GET | `/api/export` | ZIP of all projects. `?projects=a,b` for some, `&gcode=0` to leave G-code out. |
 | POST | `/api/import` | Body: the ZIP. `?mode=skip` (default) or `copy`, `&dryRun=1` to preview. Localhost only, unless `allowRemoteSettings`. |
 | GET | `/api/projects/<slug>/makerworld` | MakerWorld upload package (ZIP). |
+| PATCH | `/api/projects/<id>` | `{ tags, notes, name, status }`. Tags are lower-cased, max 30, 40 characters each. |
+| POST | `/api/projects/<slug>/images` | Body: the image (JPEG, PNG, WebP, GIF; 25 MB max). `?name=&caption=`. |
+| GET · PATCH · DELETE | `/api/projects/<slug>/images/<id>` | The image file; `{ caption }`; delete (also removes the file). |
+| POST | `/api/projects/<slug>/images/order` | `{ ids }` in the new order; the first is the cover. |
 
 ## Export and import
 
 **Export all** (or **Export** on one project) downloads a ZIP:
 
 ```
-manifest.json                  projects, items, revisions, notes, tags and print history
-projects/<slug>/…              every file in the project folder
+manifest.json                  projects, items, revisions, notes, tags, images and print history
+projects/<slug>/…              every file in the project folder (images in projects/<slug>/images/)
 projects/<slug>/_external/…    revision files that lived outside it
 ```
 
 **Import…** reads the ZIP and shows a preview first. Projects that already exist (same
 name) are either skipped or imported again under a new name (`<slug>-2`): **nothing is
 ever overwritten**. A ZIP without `manifest.json` also works: each top-level folder becomes
-a project, and files sharing a name (`hook.stl`, `hook.scad`) become one item. Paths that
+a project, files sharing a name (`hook.stl`, `hook.scad`) become one item, and pictures
+become the project's images in name order. Paths that
 try to leave the projects folder (`../`, absolute paths) are ignored.
 
 Use it to back up the library, move it to another computer, or bring in a folder of
@@ -165,7 +173,8 @@ builds:
 | `UPLOAD.md` | Step-by-step upload checklist and any warnings (unapproved revision, no images). |
 | `models/*.stl` | The approved (or latest) revision of every part. |
 | `source/*.scad` | The OpenSCAD source, to attach if you want to share it. |
-| `images/*.png` | 1600×1200 renders of each part; photos found in the project folder go in `images/photos/`. |
+| `images/NN-*` | The project's images in dashboard order; `01` is the cover. |
+| `images/renders/*.png` | 1600×1200 renders of each part, to add after the photos if you like. |
 
 Then **Open MakerWorld**, sign in with your own Bambu Lab account and upload the files,
 copying the text from `LISTING.md`. MakerWorld print profiles are made in Bambu Studio for

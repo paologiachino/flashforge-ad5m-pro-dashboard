@@ -260,7 +260,10 @@ launchctl bootout gui/$(id -u)/com.print3d.dashboard        # disable
 - **Projects → Export all** downloads a ZIP of every project (database records and files).
   Keep it as a backup, or use **Import…** on another computer: a preview shows what will be
   added, and existing projects are skipped or copied under a new name, never overwritten.
-- **Project → MakerWorld package** builds models, source, renders and a draft listing for a
+- **Project → Images / Tags:** add photos of the printed part (from the phone too), choose
+  the cover, and edit tags and description. They are part of exports and of the MakerWorld
+  package.
+- **Project → MakerWorld package** builds models, source, photos, renders and a draft listing for a
   manual upload on makerworld.com. The dashboard never signs in to MakerWorld; see the
   README for why.
 

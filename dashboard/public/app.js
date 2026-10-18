@@ -836,11 +836,15 @@ async function loadProjects() {
   if (state.search) q.set("q", state.search);
   if (state.tag) q.set("tag", state.tag);
   projectCache = await api(`/api/projects?${q}`);
-  renderProjects();
+  renderProjects(true);
 }
 
-async function renderProjects() {
+async function renderProjects(force = false) {
   const body = $("#projects-body");
+  // Status updates re-render this view every few seconds; never do it under
+  // someone who is typing a tag.
+  const typing = document.activeElement;
+  if (!force && typing && body.contains(typing) && typing.matches("input, textarea")) return;
 
   if (pendingImport) return renderImportPreview(body);
   if (state.project) return renderProjectDetail(body);
@@ -931,7 +935,7 @@ $("#import-file").addEventListener("change", async (e) => {
     $("#projects-body").innerHTML = `<p class="empty">Import failed: ${esc(err.message)}</p>`;
     return;
   }
-  renderProjects();
+  renderProjects(true);
 });
 
 // Kept outside the DOM: the project view re-renders on every status update.
@@ -940,7 +944,7 @@ const mwState = { busy: "", slug: "", note: "" };
 async function downloadMakerworld(_btn, slug) {
   if (mwState.busy) return;
   Object.assign(mwState, { busy: slug, slug, note: "Rendering previews and packing files…" });
-  renderProjects();
+  renderProjects(true);
   try {
     const r = await fetch(`/api/projects/${encodeURIComponent(slug)}/makerworld`);
     if (!r.ok) {
@@ -962,7 +966,108 @@ async function downloadMakerworld(_btn, slug) {
     mwState.note = String(err.message || err);
   } finally {
     mwState.busy = "";
-    renderProjects();
+    renderProjects(true);
+  }
+}
+
+/* --- project tags, description and images ------------------------------ */
+
+const projectEdit = { error: "", uploading: "" };
+
+async function reloadProject() {
+  state.project = await api(`/api/projects/${encodeURIComponent(state.project.slug)}`);
+  renderProjects(true);
+}
+
+async function saveProject(patch) {
+  projectEdit.error = "";
+  try {
+    await api(`/api/projects/${state.project.id}`, { method: "PATCH", body: patch });
+  } catch (err) { projectEdit.error = String(err.message); }
+  await reloadProject();
+}
+
+async function uploadImages(files) {
+  const slug = state.project.slug;
+  const list = [...files];
+  projectEdit.error = "";
+  try {
+    for (const [i, f] of list.entries()) {
+      projectEdit.uploading = `Uploading ${i + 1} of ${list.length}…`;
+      renderProjects(true);
+      const r = await fetch(`/api/projects/${encodeURIComponent(slug)}/images?${new URLSearchParams({ name: f.name })}`, {
+        method: "POST",
+        headers: { "Content-Type": f.type || "application/octet-stream" },
+        body: f,
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(`${f.name}: ${d.error || `HTTP ${r.status}`}`);
+      }
+    }
+  } catch (err) { projectEdit.error = String(err.message); }
+  projectEdit.uploading = "";
+  await reloadProject();
+}
+
+const imageInput = Object.assign(document.createElement("input"), {
+  type: "file", multiple: true, accept: "image/jpeg,image/png,image/webp,image/gif", hidden: true,
+});
+document.body.append(imageInput);
+imageInput.addEventListener("change", () => {
+  const files = imageInput.files;
+  if (files.length) uploadImages(files).finally(() => { imageInput.value = ""; });
+});
+
+document.addEventListener("submit", (e) => {
+  const form = e.target.closest("[data-tag-form]");
+  if (!form) return;
+  e.preventDefault();
+  const added = form.elements.tag.value.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean);
+  if (!added.length) return;
+  form.elements.tag.value = "";
+  form.elements.tag.blur();
+  saveProject({ tags: [...state.project.tags, ...added] })
+    .then(() => $("[data-tag-form] input")?.focus());
+});
+
+async function projectEditClick(t) {
+  const p = state.project;
+  const imgUrl = (id) => `/api/projects/${encodeURIComponent(p.slug)}/images/${id}`;
+  if (t.dataset.tagRemove !== undefined) return saveProject({ tags: p.tags.filter((x) => x !== t.dataset.tagRemove) });
+  if (t.dataset.editNotes !== undefined) {
+    const notes = await ask("Project description", "what it is, what it is for, how it fits", p.notes || "");
+    if (notes !== null) return saveProject({ notes });
+    return;
+  }
+  if (t.dataset.imageAdd !== undefined) { if (!projectEdit.uploading) imageInput.click(); return; }
+  if (t.dataset.imageDelete) {
+    const img = p.images.find((i) => i.id === Number(t.dataset.imageDelete));
+    if (!confirm(`Delete ${img?.file || "this image"}? The file is removed from the project folder.`)) return;
+    await api(imgUrl(t.dataset.imageDelete), { method: "DELETE" });
+    return reloadProject();
+  }
+  if (t.dataset.imageCaption) {
+    const img = p.images.find((i) => i.id === Number(t.dataset.imageCaption));
+    const caption = await ask("Image caption", "e.g. printed in PETG, 0.2 mm layers", img?.caption || "");
+    if (caption === null) return;
+    await api(imgUrl(t.dataset.imageCaption), { method: "PATCH", body: { caption } });
+    return reloadProject();
+  }
+  const ids = p.images.map((i) => i.id);
+  if (t.dataset.imageCover) {
+    const id = Number(t.dataset.imageCover);
+    await api(`/api/projects/${encodeURIComponent(p.slug)}/images/order`, { method: "POST", body: { ids: [id, ...ids.filter((x) => x !== id)] } });
+    return reloadProject();
+  }
+  if (t.dataset.imageMove) {
+    const id = Number(t.dataset.imageMove);
+    const i = ids.indexOf(id);
+    const j = i + Number(t.dataset.dir);
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    await api(`/api/projects/${encodeURIComponent(p.slug)}/images/order`, { method: "POST", body: { ids } });
+    return reloadProject();
   }
 }
 
@@ -982,9 +1087,37 @@ function renderProjectDetail(body) {
         <div class="detail-title">${esc(p.name)}</div>
         <div class="detail-dir">${esc(p.dir)}</div>
       </div>
-      ${p.tags.length ? `<div class="tag-row">${p.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}
     </div>
     ${p.notes ? `<p class="card-notes" style="margin-top:10px">${esc(p.notes)}</p>` : ""}
+
+    <div class="section-title"><span class="k">tags</span></div>
+    <div class="tag-editor">
+      ${p.tags.map((t) => `<span class="tag removable">${esc(t)}<button type="button" class="tag-x" data-tag-remove="${esc(t)}" aria-label="Remove tag ${esc(t)}">×</button></span>`).join("")}
+      <form class="tag-add" data-tag-form>
+        <input type="text" name="tag" placeholder="add tag" maxlength="40" autocomplete="off" aria-label="New tag">
+        <button type="submit" class="ghost-btn">Add</button>
+      </form>
+      <button type="button" class="ghost-btn" data-edit-notes>Edit description</button>
+    </div>
+    ${projectEdit.error ? `<p class="tiny bad">${esc(projectEdit.error)}</p>` : ""}
+
+    <div class="section-title"><span class="k">images</span>
+      <button type="button" class="ghost-btn" data-image-add>${projectEdit.uploading ? esc(projectEdit.uploading) : "Add images…"}</button>
+    </div>
+    ${p.images?.length ? `<div class="gallery">${p.images.map((img, i) => `
+      <figure class="shot">
+        <a href="${esc(img.url)}" target="_blank" rel="noopener"><img src="${esc(img.url)}" alt="${esc(img.caption || img.file)}" loading="lazy"></a>
+        ${i === 0 ? `<span class="cover-badge">cover</span>` : ""}
+        <figcaption>${esc(img.caption || img.file)}</figcaption>
+        <div class="shot-actions">
+          <button type="button" data-image-move="${img.id}" data-dir="-1" ${i === 0 ? "disabled" : ""} aria-label="Move earlier">◀</button>
+          <button type="button" data-image-move="${img.id}" data-dir="1" ${i === p.images.length - 1 ? "disabled" : ""} aria-label="Move later">▶</button>
+          ${i ? `<button type="button" data-image-cover="${img.id}">Cover</button>` : ""}
+          <button type="button" data-image-caption="${img.id}">Caption</button>
+          <button type="button" data-image-delete="${img.id}">Delete</button>
+        </div>
+      </figure>`).join("")}</div>`
+    : `<p class="empty">No images yet. Add photos of the printed part: they go into exports and the MakerWorld package, the first one as cover.</p>`}
     <div class="project-actions">
       <a class="ghost-btn" href="/api/export?projects=${encodeURIComponent(p.slug)}" download>Export</a>
       <button type="button" class="ghost-btn" data-makerworld="${esc(p.slug)}" ${mwState.busy === p.slug ? "disabled" : ""}>${mwState.busy === p.slug ? "Preparing…" : "MakerWorld package"}</button>
@@ -1247,23 +1380,26 @@ async function loadHistory() {
 /* --- delegated clicks -------------------------------------------------- */
 
 document.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-project],[data-back],[data-item],[data-review],[data-enqueue],[data-release],[data-remove],[data-up],[data-tag],[data-outcome],[data-makerworld],[data-import-mode],[data-import-cancel]");
-  if (!t) return;
+  const t = e.target.closest("[data-project],[data-back],[data-item],[data-review],[data-enqueue],[data-release],[data-remove],[data-up],[data-tag],[data-outcome],[data-makerworld],[data-import-mode],[data-import-cancel],[data-tag-remove],[data-edit-notes],[data-image-add],[data-image-delete],[data-image-caption],[data-image-cover],[data-image-move]");
+  if (!t || t.disabled) return;
 
   try {
+    if (t.matches("[data-tag-remove],[data-edit-notes],[data-image-add],[data-image-delete],[data-image-caption],[data-image-cover],[data-image-move]")) {
+      return await projectEditClick(t);
+    }
     if (t.dataset.makerworld) return downloadMakerworld(t, t.dataset.makerworld);
     if (t.dataset.importMode) return runImport(t.dataset.importMode);
-    if (t.dataset.importCancel !== undefined) { pendingImport = null; return renderProjects(); }
+    if (t.dataset.importCancel !== undefined) { pendingImport = null; return renderProjects(true); }
     if (t.dataset.tag !== undefined) {
       state.tag = state.tag === t.dataset.tag ? "" : t.dataset.tag;
       return loadProjects();
     }
-    if (t.dataset.back) { state.project = null; return renderProjects(); }
+    if (t.dataset.back) { state.project = null; return renderProjects(true); }
     if (t.dataset.review) return openItem(Number(t.dataset.review));
     if (t.dataset.enqueue) {
       await api("/api/queue", { method: "POST", body: { item: Number(t.dataset.enqueue) } });
       state.project = await api(`/api/projects/${encodeURIComponent(state.project.slug)}`);
-      return renderProjects();
+      return renderProjects(true);
     }
     if (t.dataset.release) return releaseNext(t.dataset.release);
     if (t.dataset.remove) {

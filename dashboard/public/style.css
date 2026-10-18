@@ -487,6 +487,73 @@ body[data-view="review"] .review-facts { order: -1; }
 }
 .tag.on { color: var(--hot); border-color: #5a3220; background: #1a1510; }
 
+/* --- project tag editor and image gallery ------------------------------ */
+
+.tag-editor { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.tag.removable { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); cursor: default; }
+.tag-x {
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  padding: 0 2px;
+  cursor: pointer;
+}
+.tag-x:hover { color: var(--bad); }
+.tag-add { display: inline-flex; gap: 6px; }
+.tag-add input {
+  width: 140px;
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 6px 8px;
+  color: var(--ink);
+  background: #0e1014;
+  border: 1px solid var(--line);
+  outline: none;
+}
+.tag-add input:focus { border-color: #5a3220; }
+.tag-editor .ghost-btn { padding: 6px 10px; }
+.bad { color: var(--bad) !important; }
+
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.shot { position: relative; margin: 0; border: 1px solid var(--line); background: #0e1014; display: grid; }
+.shot img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: var(--bg); }
+.shot figcaption {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 6px 8px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cover-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 3px 6px;
+  color: #1a120c;
+  background: var(--ember);
+}
+.shot-actions { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px 8px; }
+.shot-actions button {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 4px 6px;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+.shot-actions button:hover:not(:disabled) { border-color: var(--muted); }
+.shot-actions button:disabled { opacity: 0.3; cursor: default; }
+.section-title .ghost-btn { padding: 6px 10px; }
+
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
 .card {
   border: 1px solid var(--line);
