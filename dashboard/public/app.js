@@ -567,7 +567,7 @@ let camRetry = null;
 
 function camConnect() {
   clearTimeout(camRetry);
-  camNote.textContent = "connessione…";
+  camNote.textContent = "connecting…";
   camImg.src = `/api/camera/stream?t=${Date.now()}`;
 }
 
@@ -580,7 +580,7 @@ function camDisconnect() {
 function setCamera(on) {
   camOn = on;
   camFrame.hidden = !on;
-  camToggle.textContent = on ? "Nascondi camera" : "Mostra camera";
+  camToggle.textContent = on ? "Hide camera" : "Show camera";
   camToggle.setAttribute("aria-expanded", on ? "true" : "false");
   if (on) camConnect(); else camDisconnect();
 }
@@ -591,7 +591,7 @@ camImg.addEventListener("load", () => {
 });
 camImg.addEventListener("error", () => {
   if (!camOn || !camImg.src.includes("/api/camera/")) return;
-  camNote.textContent = "camera non raggiungibile, riprovo…";
+  camNote.textContent = "camera unreachable, retrying…";
   camRetry = setTimeout(camConnect, 5000);
 });
 
