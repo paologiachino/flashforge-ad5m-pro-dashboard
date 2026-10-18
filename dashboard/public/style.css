@@ -316,6 +316,21 @@ button.go:disabled { opacity: 0.4; cursor: not-allowed; }
 .refresh { border: 1px solid var(--line); padding: 12px; display: grid; gap: 10px; }
 .refresh-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 
+.camera { border: 1px solid var(--line); padding: 12px; display: grid; gap: 10px; }
+.camera-frame { display: grid; gap: 10px; }
+.camera-frame[hidden] { display: none; }
+.camera-frame img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
+  background: var(--bg);
+  border: 1px solid var(--line);
+}
+.camera-frame img:fullscreen { border: 0; aspect-ratio: auto; height: 100%; }
+.camera-actions { display: flex; gap: 6px; }
+.camera-actions .ghost-btn { text-decoration: none; padding: 6px 9px; }
+
 .toggle {
   width: 42px; height: 22px;
   border: 1px solid var(--line);

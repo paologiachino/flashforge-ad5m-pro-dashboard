@@ -97,6 +97,23 @@
         </div>
       </section>
 
+      <section class="block camera" id="camera-block">
+        <div class="refresh-row">
+          <span class="k">camera</span>
+          <button type="button" class="ghost-btn" id="camera-toggle" aria-expanded="false" aria-controls="camera-frame">Mostra camera</button>
+        </div>
+        <div class="camera-frame" id="camera-frame" hidden>
+          <img id="camera-img" alt="Vista live della camera della stampante">
+          <div class="refresh-row">
+            <span class="mono tiny" id="camera-note">connessione…</span>
+            <span class="camera-actions">
+              <a class="ghost-btn" id="camera-snap" href="/api/camera/snapshot" target="_blank" rel="noopener">Foto</a>
+              <button type="button" class="ghost-btn" id="camera-full">Schermo intero</button>
+            </span>
+          </div>
+        </div>
+      </section>
+
       <section class="block review-facts" id="review-facts" hidden></section>
 
       <section class="block times">

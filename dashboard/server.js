@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // Adventurer 5M dashboard: projects, review queue, print history.
 //
-// The printer is only ever read (/detail). Nothing here starts, pauses, cancels
-// or uploads a job — the agent does that through the openscad MCP server once
-// the user has released a queue entry here.
+// The printer is only ever read (/detail, plus its camera while someone is
+// watching). Nothing here starts, pauses, cancels or uploads a job — the agent
+// does that through the openscad MCP server once the user has released a queue
+// entry here.
 
 import http from "node:http";
 import {
@@ -378,6 +379,84 @@ function broadcast() {
   }
 }
 
+// --- camera ----------------------------------------------------------------
+//
+// The printer runs MJPG-Streamer, which copes badly with more than one viewer
+// and is only reachable on the LAN by IP. So the dashboard holds at most one
+// upstream connection, opened only while someone is watching, and fans the
+// frames out to every viewer. Frames are cut on JPEG SOI/EOI markers rather
+// than trusting the upstream multipart framing, so a viewer that joins mid
+// stream always starts on a whole frame.
+
+const CAMERA_URL = process.env.CAMERA_URL || fileCfg.cameraUrl || `http://${CFG.ip}:8080/?action=stream`;
+const SNAPSHOT_URL = CAMERA_URL.replace("action=stream", "action=snapshot");
+const SOI = Buffer.from([0xff, 0xd8]);
+const EOI = Buffer.from([0xff, 0xd9]);
+const BOUNDARY = "camframe";
+
+const cam = { viewers: new Set(), req: null, buf: Buffer.alloc(0), last: null, lastTs: 0, retry: null, error: "" };
+
+function camEmit(frame) {
+  cam.last = frame;
+  cam.lastTs = Date.now();
+  cam.error = "";
+  for (const res of cam.viewers) {
+    // A viewer on slow Wi-Fi skips frames instead of buffering without bound.
+    if (res.writableLength > 1_000_000) continue;
+    res.write(`--${BOUNDARY}\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.length}\r\n\r\n`);
+    res.write(frame);
+    res.write("\r\n");
+  }
+}
+
+function camData(chunk) {
+  cam.buf = cam.buf.length ? Buffer.concat([cam.buf, chunk]) : chunk;
+  for (;;) {
+    const start = cam.buf.indexOf(SOI);
+    if (start < 0) { cam.buf = Buffer.alloc(0); return; }
+    const end = cam.buf.indexOf(EOI, start + 2);
+    if (end < 0) {
+      cam.buf = cam.buf.subarray(start);
+      if (cam.buf.length > 5_000_000) cam.buf = Buffer.alloc(0);
+      return;
+    }
+    camEmit(Buffer.from(cam.buf.subarray(start, end + 2)));
+    cam.buf = cam.buf.subarray(end + 2);
+  }
+}
+
+function camStart() {
+  if (cam.req || !cam.viewers.size) return;
+  clearTimeout(cam.retry);
+  const req = http.get(CAMERA_URL, (up) => {
+    if (up.statusCode !== 200) { up.resume(); return camFail(req, `camera answered HTTP ${up.statusCode}`); }
+    up.on("data", (c) => { if (cam.req === req) camData(c); });
+    up.on("end", () => camFail(req, "camera stream ended"));
+    up.on("error", (e) => camFail(req, e.message));
+  });
+  // Socket idle timeout: a stalled stream is dropped and retried.
+  req.setTimeout(10000, () => req.destroy(new Error("camera did not respond")));
+  req.on("error", (e) => camFail(req, e.message));
+  cam.req = req;
+}
+
+function camFail(req, why) {
+  if (cam.req !== req) return;
+  cam.req = null;
+  cam.buf = Buffer.alloc(0);
+  cam.error = why;
+  if (cam.viewers.size) cam.retry = setTimeout(camStart, 3000);
+}
+
+function camStop() {
+  if (cam.viewers.size) return;
+  clearTimeout(cam.retry);
+  const req = cam.req;
+  cam.req = null;
+  cam.buf = Buffer.alloc(0);
+  req?.destroy();
+}
+
 // --- routes ----------------------------------------------------------------
 
 const routes = [];
@@ -406,6 +485,41 @@ on("POST", /^\/api\/refresh$/, async (req, res) => {
   await poll(true);
   json(res, 200, statePayload());
 });
+
+on("GET", /^\/api\/camera\/stream$/, (req, res) => {
+  res.writeHead(200, {
+    "Content-Type": `multipart/x-mixed-replace; boundary=${BOUNDARY}`,
+    "Cache-Control": "no-store",
+    Connection: "close",
+  });
+  cam.viewers.add(res);
+  // Show something at once rather than waiting for the next frame.
+  if (cam.last && Date.now() - cam.lastTs < 2000) {
+    res.write(`--${BOUNDARY}\r\nContent-Type: image/jpeg\r\nContent-Length: ${cam.last.length}\r\n\r\n`);
+    res.write(cam.last);
+    res.write("\r\n");
+  }
+  req.on("close", () => { cam.viewers.delete(res); camStop(); });
+  camStart();
+});
+
+on("GET", /^\/api\/camera\/snapshot$/, async (req, res) => {
+  const headers = { "Content-Disposition": `inline; filename="camera-${Date.now()}.jpg"` };
+  if (cam.last && Date.now() - cam.lastTs < 2000) return send(res, 200, "image/jpeg", cam.last, { headers });
+  let r;
+  try { r = await fetch(SNAPSHOT_URL, { signal: AbortSignal.timeout(8000) }); }
+  catch (e) { return json(res, 502, { error: `camera unreachable: ${e.cause?.code || e.message}` }); }
+  if (!r.ok) return json(res, 502, { error: `camera answered HTTP ${r.status}` });
+  send(res, 200, "image/jpeg", Buffer.from(await r.arrayBuffer()), { headers });
+});
+
+on("GET", /^\/api\/camera$/, (req, res) => json(res, 200, {
+  url: CAMERA_URL,
+  viewers: cam.viewers.size,
+  connected: Boolean(cam.req),
+  lastFrameAgoMs: cam.lastTs ? Date.now() - cam.lastTs : null,
+  error: cam.error || null,
+}));
 
 on("GET", /^\/api\/info$/, (req, res) => json(res, 200, {
   port: CFG.port,

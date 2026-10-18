@@ -554,6 +554,59 @@ async function refreshNow() {
 }
 $("#refresh-now").addEventListener("click", refreshNow);
 
+/* --- camera ------------------------------------------------------------ */
+
+// Off by default and never remembered: the stream costs the printer and the
+// Wi-Fi something for as long as it is open, so it only runs when asked for.
+const camToggle = $("#camera-toggle");
+const camFrame = $("#camera-frame");
+const camImg = $("#camera-img");
+const camNote = $("#camera-note");
+let camOn = false;
+let camRetry = null;
+
+function camConnect() {
+  clearTimeout(camRetry);
+  camNote.textContent = "connessione…";
+  camImg.src = `/api/camera/stream?t=${Date.now()}`;
+}
+
+function camDisconnect() {
+  clearTimeout(camRetry);
+  // Swapping src is what makes Safari actually close an MJPEG request.
+  camImg.src = "data:image/gif;base64,R0lGODlhAQABAAAAACw=";
+}
+
+function setCamera(on) {
+  camOn = on;
+  camFrame.hidden = !on;
+  camToggle.textContent = on ? "Nascondi camera" : "Mostra camera";
+  camToggle.setAttribute("aria-expanded", on ? "true" : "false");
+  if (on) camConnect(); else camDisconnect();
+}
+
+camToggle.addEventListener("click", () => setCamera(!camOn));
+camImg.addEventListener("load", () => {
+  if (camOn && camImg.src.includes("/api/camera/")) camNote.textContent = "live";
+});
+camImg.addEventListener("error", () => {
+  if (!camOn || !camImg.src.includes("/api/camera/")) return;
+  camNote.textContent = "camera non raggiungibile, riprovo…";
+  camRetry = setTimeout(camConnect, 5000);
+});
+
+$("#camera-full").addEventListener("click", () => {
+  const full = camImg.requestFullscreen || camImg.webkitRequestFullscreen;
+  // iPhone Safari has no fullscreen for images, so open the stream on its own.
+  if (full) full.call(camImg); else window.open("/api/camera/stream", "_blank", "noopener");
+});
+
+// A hidden tab keeps nothing open.
+document.addEventListener("visibilitychange", () => {
+  if (!camOn) return;
+  if (document.hidden) camDisconnect(); else camConnect();
+});
+
 /* --- status ------------------------------------------------------------ */
 
 function setNote(text) {
