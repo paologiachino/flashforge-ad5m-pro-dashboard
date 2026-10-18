@@ -1,88 +1,85 @@
-# Prompt per Claude: installazione completa
+# Prompt for Claude: full setup
 
-Copia tutto il testo sotto la linea e incollalo in una **nuova sessione di Claude Code**
-(app desktop, scheda Code, oppure terminale) su un Mac. Claude installerà e verificherà
-l'intera catena descritta in [SETUP-macOS.md](SETUP-macOS.md), chiedendoti i dati della
-stampante solo quando servono.
+Copy everything below the line and paste it into a **new Claude Code session** (desktop
+app Code tab, or terminal) on a Mac. Claude will install and verify the whole toolchain
+described in [SETUP-macOS.md](SETUP-macOS.md), asking for the printer details only when
+they are needed. Claude answers in the language you write to it in.
 
 ---
 
-Sei il mio assistente per configurare un ambiente di progettazione e stampa 3D su questo
-Mac. Lavora in italiano, un passo alla volta, verifica ogni passo prima di passare al
-successivo e dimmi chiaramente cosa è fallito invece di andare avanti.
+You are my assistant for setting up a 3D design-and-print environment on this Mac. Reply
+in the language I write in. Work one step at a time, verify each step before moving on,
+and tell me clearly what failed instead of carrying on past it.
 
-## Obiettivo
+## Goal
 
-Poterti chiedere «progettami X e stampalo» e ottenere: modello OpenSCAD → anteprime →
-revisione nella dashboard → slicing con i profili ufficiali Flashforge → stampa sulla mia
-**Flashforge Adventurer 5M Pro** (oppure Adventurer 5M: chiedimi quale), dopo il mio
-consenso.
+I want to ask you "design X and print it" and get: OpenSCAD model → previews → review in
+the dashboard → slicing with the official Flashforge profiles → print on my
+**Flashforge Adventurer 5M Pro** (or Adventurer 5M: ask me which), after my consent.
 
-## Riferimenti
+## References
 
-- Repository: `https://github.com/paologiachino/flashforge-ad5m-pro-dashboard` (Flashforge Adventurer 5M Pro Dashboard).
-  Leggi `README.md`, `docs/SETUP-macOS.md` e `skills/print3d-setup/SKILL.md` prima di
-  iniziare: sono la fonte di verità.
-- Cartella del repository: `~/Documents/3D/ai-3d-print`. Libreria dei modelli:
-  `~/Documents/3D/Modelli`. Prima di creare le cartelle chiedimi se voglio percorsi diversi.
+- Repository: `https://github.com/paologiachino/flashforge-ad5m-pro-dashboard`
+  (Flashforge Adventurer 5M Pro Dashboard). Read `README.md`, `docs/SETUP-macOS.md` and
+  `skills/print3d-setup/SKILL.md` before starting: they are the source of truth.
+- Repository folder: `~/Documents/3D/ai-3d-print`. Models library:
+  `~/Documents/3D/Models`. Ask me whether I want other paths before creating folders.
 
-## Regole
+## Rules
 
-1. **Controlla prima cosa c'è già** (`brew`, `node`, `uv`, `openscad`, app in
-   `/Applications`, `~/.claude.json`, `~/.claude/skills`) e salta ciò che funziona già.
-2. **Non mettere mai** IP, numero di serie o check code nel repository, nei commit o nelle
-   variabili d'ambiente dei server MCP. Vanno solo in `~/.print3d/printer.json`, con
-   permessi 600, preferibilmente tramite la pagina Settings della dashboard.
-3. **Fai un backup** di `~/.claude.json` prima di modificarlo.
-4. **Non avviare stampe**, non caricare file sulla stampante e non mandare comandi di
-   pausa o annullamento durante l'installazione. Sulla stampante sono ammesse solo letture
-   (`printer_status`, `printer_files`).
-5. Le installazioni grafiche (Flash Studio, OrcaSlicer, Blender) le faccio io: dimmi cosa
-   scaricare e da dove, poi verifica.
-6. Leggi il codice dei server MCP di terze parti prima di registrarli e dimmi se noti
-   qualcosa di sospetto.
+1. **Check what is already there first** (`brew`, `node`, `uv`, `openscad`, apps in
+   `/Applications`, `~/.claude.json`, `~/.claude/skills`) and skip whatever already works.
+2. **Never put** the IP, serial number or check code in the repository, in commits or in
+   MCP server environment variables. They go only in `~/.print3d/printer.json` with mode
+   600, preferably through the dashboard's Settings page.
+3. **Back up** `~/.claude.json` before editing it.
+4. **Do not start prints**, upload files to the printer, or send pause/cancel commands
+   during setup. Only reads are allowed on the printer (`printer_status`, `printer_files`).
+5. I install the GUI apps (Flash Studio, OrcaSlicer, Blender) myself: tell me what to
+   download and from where, then verify.
+6. Read the code of third-party MCP servers before registering them, and tell me if
+   anything looks suspicious.
 
-## Passi
+## Steps
 
-1. **Programmi di base:** `brew install uv node@22` e
-   `brew install --cask openscad@snapshot`. Verifica con `openscad --version` e
+1. **Base software:** `brew install uv node@22` and
+   `brew install --cask openscad@snapshot`. Verify with `openscad --version` and
    `/opt/homebrew/opt/node@22/bin/node --version`.
-2. **BOSL2:** clona `https://github.com/BelfrySCAD/BOSL2` in
-   `~/Documents/OpenSCAD/libraries/BOSL2`. Prova un `cuboid` con `rounding` ed esportalo in
-   STL.
-3. **Flash Studio:** verifica che esista
+2. **BOSL2:** clone `https://github.com/BelfrySCAD/BOSL2` into
+   `~/Documents/OpenSCAD/libraries/BOSL2`. Test a `cuboid` with `rounding` and export it
+   to STL.
+3. **Flash Studio:** check that
    `/Applications/Flash Studio.app/Contents/Resources/profiles/Flashforge/machine/Flashforge Adventurer 5M Pro 0.4 Nozzle.json`
-   e fai uno slicing di prova da riga di comando con `--curr-bed-type "High Temp Plate"`.
-4. **Repository:** clonalo, poi copia `dashboard/config.example.macos.json` in
-   `dashboard/config.json` con i percorsi della mia libreria.
-5. **Skill:** copia `skills/print3d` e `skills/print3d-setup` in `~/.claude/skills/`.
-6. **Server MCP** in `~/.claude.json` → `mcpServers`, a livello utente:
-   - `openscad`: `node <repo>/skills/print3d/scripts/openscad-mcp.mjs` con
-     `SCAD_PROJECT_DIR=<libreria>` e un `PATH` che includa `/opt/homebrew/bin`;
-   - facoltativo, chiedimelo: `orcaslicer` = `uvx --python 3.12 --with "mcp<2" orca-mcp`
-     con `ORCASLICER_PATH`;
-   - facoltativo, chiedimelo: `blender` = `uvx mcp-for-blender` con
-     `DISABLE_TELEMETRY=true`, più `uvx mcp-for-blender install-addon` e l'attivazione
-     dell'add-on.
+   exists, and run a test slice from the command line with
+   `--curr-bed-type "High Temp Plate"`.
+4. **Repository:** clone it, then copy `dashboard/config.example.macos.json` to
+   `dashboard/config.json` with the paths of my library.
+5. **Skills:** copy `skills/print3d` and `skills/print3d-setup` into `~/.claude/skills/`.
+6. **MCP servers** in `~/.claude.json` → `mcpServers`, at user level:
+   - `openscad`: `node <repo>/skills/print3d/scripts/openscad-mcp.mjs` with
+     `SCAD_PROJECT_DIR=<library>` and a `PATH` that includes `/opt/homebrew/bin`;
+   - optional, ask me: `orcaslicer` = `uvx --python 3.12 --with "mcp<2" orca-mcp` with
+     `ORCASLICER_PATH`;
+   - optional, ask me: `blender` = `uvx mcp-for-blender` with `DISABLE_TELEMETRY=true`,
+     plus `uvx mcp-for-blender install-addon` and enabling the add-on.
 
-   Verifica ogni server avviandolo e chiamando `initialize` e `tools/list` tramite stdio.
-   Per `openscad` prova anche `scad_render`, `scad_export` e `scad_slice` su un cubo, poi
-   cancella i file di prova.
-7. **Dashboard:** esegui `macos/install-dashboard-agent.sh`, controlla che
-   `http://127.0.0.1:3470/api/settings` risponda e che il servizio sia `running`.
-8. **Stampante:** chiedimi di attivare la modalità LAN e di leggere **IP, numero di serie e
-   check code** dallo schermo. Salvali con `POST /api/settings`, oppure dimmi di inserirli
-   nella pagina Settings del browser, insieme al modello. Poi `POST /api/settings/test` e
-   `printer_status` in sola lettura. Se la stampante non risponde, usa
-   `/api/settings/discover`.
-9. **Camera** (solo 5M Pro): verifica che `/api/camera/snapshot` restituisca un JPEG.
-10. **Resoconto finale:** una tabella con ogni componente, lo stato (✅/❌) e come l'hai
-    verificato. Aggiungi l'indirizzo della dashboard dal telefono
-    (`http://<LocalHostName>.local`) e ricordami di aprire una **nuova sessione** per
-    caricare gli strumenti MCP.
+   Verify each server by starting it and calling `initialize` and `tools/list` over stdio.
+   For `openscad`, also try `scad_render`, `scad_export` and `scad_slice` on a cube, then
+   delete the test files.
+7. **Dashboard:** run `macos/install-dashboard-agent.sh`, check that
+   `http://127.0.0.1:3470/api/settings` answers and that the agent is `running`.
+8. **Printer:** ask me to turn on LAN mode and read the **IP, serial number and check
+   code** from its screen. Save them with `POST /api/settings`, or tell me to enter them
+   on the Settings page in the browser, together with the model. Then run
+   `POST /api/settings/test` and a read-only `printer_status`. If the printer does not
+   answer, use `/api/settings/discover`.
+9. **Camera** (5M Pro only): check that `/api/camera/snapshot` returns a JPEG.
+10. **Final report:** a table with each component, its status (✅/❌) and how you checked
+    it. Add the dashboard address for my phone (`http://<LocalHostName>.local`) and remind
+    me to open a **new session** to load the MCP tools.
 
-## Dopo l'installazione
+## After setup
 
-Per progettare e stampare segui la skill `print3d`. Chiedimi sempre se voglio solo il
-progetto o anche la stampa, quale filamento è caricato, e aspetta la mia approvazione in
-dashboard prima di stampare.
+To design and print, follow the `print3d` skill. Always ask whether I want the design only
+or also the print and which filament is loaded, and wait for my approval in the dashboard
+before printing.
