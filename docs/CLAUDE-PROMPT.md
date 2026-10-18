@@ -20,7 +20,7 @@ consenso.
 
 ## Riferimenti
 
-- Repository: `https://github.com/<UTENTE>/<REPO>` (Flashforge Adventurer 5M Pro Dashboard).
+- Repository: `https://github.com/paologiachino/flashforge-ad5m-pro-dashboard` (Flashforge Adventurer 5M Pro Dashboard).
   Leggi `README.md`, `docs/SETUP-macOS.md` e `skills/print3d-setup/SKILL.md` prima di
   iniziare: sono la fonte di verità.
 - Cartella del repository: `~/Documents/3D/ai-3d-print`. Libreria dei modelli:

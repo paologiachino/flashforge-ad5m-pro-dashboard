@@ -56,7 +56,7 @@ Il progetto è un fork di [ethanj2k/ai-3d-print](https://github.com/ethanj2k/ai-
 ```bash
 brew install uv node@22 gh
 brew install --cask openscad@snapshot
-git clone https://github.com/<tuo-utente>/<questo-repo>.git ~/Documents/3D/ai-3d-print
+git clone https://github.com/paologiachino/flashforge-ad5m-pro-dashboard.git ~/Documents/3D/ai-3d-print
 git clone --depth 1 https://github.com/BelfrySCAD/BOSL2.git ~/Documents/OpenSCAD/libraries/BOSL2
 cp ~/Documents/3D/ai-3d-print/dashboard/config.example.macos.json ~/Documents/3D/ai-3d-print/dashboard/config.json
 # modifica config.json: sostituisci YOUR_USER e scegli la cartella dei modelli

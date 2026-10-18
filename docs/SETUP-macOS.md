@@ -101,7 +101,7 @@ openscad -o /tmp/t.stl /tmp/t.scad     # deve riportare "Genus: 0"
 
 ```bash
 mkdir -p ~/Documents/3D/Modelli/projects
-git clone https://github.com/<tuo-utente>/<questo-repo>.git ~/Documents/3D/ai-3d-print
+git clone https://github.com/paologiachino/flashforge-ad5m-pro-dashboard.git ~/Documents/3D/ai-3d-print
 cp ~/Documents/3D/ai-3d-print/dashboard/config.example.macos.json \
    ~/Documents/3D/ai-3d-print/dashboard/config.json
 ```
