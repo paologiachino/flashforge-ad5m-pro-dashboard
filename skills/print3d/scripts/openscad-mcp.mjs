@@ -12,13 +12,22 @@ import { join, resolve, basename, extname, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createConnection } from "node:net";
 
+// Standard install locations per OS; env vars override.
+const MAC = process.platform === "darwin";
+const firstExisting = (...paths) => paths.find((p) => existsSync(p)) || paths[0];
 const SCAD =
-  process.env.OPENSCAD_BIN || "C:\\Program Files\\OpenSCAD (Nightly)\\openscad.exe";
+  process.env.OPENSCAD_BIN || (MAC
+    ? firstExisting("/opt/homebrew/bin/openscad", "/usr/local/bin/openscad",
+        "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD")
+    : "C:\\Program Files\\OpenSCAD (Nightly)\\openscad.exe");
 const SLICER =
-  process.env.FLASHSTUDIO_BIN || "C:\\Program Files\\Flashforge\\Flash Studio Desktop\\flash studio.exe";
+  process.env.FLASHSTUDIO_BIN || (MAC
+    ? "/Applications/Flash Studio.app/Contents/MacOS/Flash Studio"
+    : "C:\\Program Files\\Flashforge\\Flash Studio Desktop\\flash studio.exe");
 const PROFILES =
-  process.env.FLASHSTUDIO_PROFILES ||
-  "C:\\Program Files\\Flashforge\\Flash Studio Desktop\\resources\\profiles\\Flashforge";
+  process.env.FLASHSTUDIO_PROFILES || (MAC
+    ? "/Applications/Flash Studio.app/Contents/Resources/profiles/Flashforge"
+    : "C:\\Program Files\\Flashforge\\Flash Studio Desktop\\resources\\profiles\\Flashforge");
 
 const PORT = 8898;
 
@@ -124,7 +133,14 @@ function diagnostics(err) {
 // Process profiles are not uniformly named across nozzles (0.4 has Fine/Standard/Draft,
 // 0.8 only Standard), so resolve against what is on disk rather than guessing a
 // filename and failing opaquely.
-function resolveProfiles({ printer = "Adventurer 5M", nozzle = "0.4", quality = "standard" }) {
+// The model saved in printer.json (dashboard Settings) picks the slicer
+// profile when the caller does not name one.
+function defaultPrinter() {
+  const m = loadPrinterFile().model;
+  return m === "Adventurer 5M Pro" || m === "Adventurer 5M" ? m : "Adventurer 5M";
+}
+
+function resolveProfiles({ printer = defaultPrinter(), nozzle = "0.4", quality = "standard" }) {
   const machineDir = join(PROFILES, "machine");
   const processDir = join(PROFILES, "process");
   const machine = `Flashforge ${printer} ${nozzle} Nozzle.json`;
@@ -262,8 +278,9 @@ function fmtDuration(sec) {
 }
 
 function summarizeDetail(d) {
-  // pid arrives as a hex string ("0023"); parse base-16 for a rename-proof model id.
-  const pid = parseInt(d.pid, 16);
+  // Firmware sends pid as a decimal number (36) or a zero-padded hex string ("0024").
+  const s = String(d.pid ?? "").trim();
+  const pid = /^0[0-9a-f]{3}$/i.test(s) ? parseInt(s, 16) : Number(s);
   const pct = d.printProgress != null ? (d.printProgress <= 1 ? d.printProgress * 100 : d.printProgress) : null;
   const L = [];
   L.push(`Printer:   ${d.name || "(unnamed)"} - ${PIDS[pid] || `pid ${d.pid}`} - fw ${d.firmwareVersion || "?"}`);
@@ -370,7 +387,8 @@ const TOOLS = [
       properties: {
         stl: { type: "string", description: "Path to the mesh, relative to the project dir." },
         out: { type: "string", description: "Output .gcode path. Defaults to <stl basename>.gcode" },
-        printer: { type: "string", enum: ["Adventurer 5M", "Adventurer 5M Pro"], default: "Adventurer 5M" },
+        printer: { type: "string", enum: ["Adventurer 5M", "Adventurer 5M Pro"],
+          description: "Defaults to the model saved in printer.json (dashboard Settings), else Adventurer 5M." },
         nozzle: { type: "string", enum: ["0.25", "0.4", "0.6", "0.8"], default: "0.4" },
         quality: { type: "string", enum: ["fine", "standard", "draft"], default: "standard",
           description: "On a 0.4 nozzle: fine=0.12mm, standard=0.20mm, draft=0.24mm." },

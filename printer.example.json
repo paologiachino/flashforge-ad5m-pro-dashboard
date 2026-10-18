@@ -1,5 +1,7 @@
 {
-  "ip": "192.168.86.0",
+  "ip": "192.168.1.50",
   "serial": "SNXXXXXXXXXXXX",
-  "checkCode": "xxxxxxxx"
+  "checkCode": "xxxxxxxx",
+  "model": "Adventurer 5M Pro",
+  "camera": true
 }

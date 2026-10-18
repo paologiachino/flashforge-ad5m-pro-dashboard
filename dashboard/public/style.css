@@ -132,7 +132,8 @@ body[data-view="print"]    .view-print,
 body[data-view="review"]   .view-print,
 body[data-view="projects"] .view-projects,
 body[data-view="queue"]    .view-queue,
-body[data-view="history"]  .view-history { display: grid; }
+body[data-view="history"]  .view-history,
+body[data-view="settings"] .view-settings { display: grid; }
 
 main.view-print { grid-template-columns: 1fr 300px; }
 
@@ -420,6 +421,51 @@ body[data-view="review"] .review-facts { order: -1; }
   outline: none;
 }
 #project-search:focus { border-color: #5a3220; }
+
+/* --- settings ---------------------------------------------------------- */
+
+.view-settings { grid-template-columns: minmax(0, 1fr); }
+.settings { max-width: 560px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
+#settings-file, #settings-found { overflow-wrap: anywhere; }
+.settings .field { display: grid; gap: 6px; }
+.settings .field-row { display: flex; gap: 8px; }
+.settings .field-row input { flex: 1; min-width: 0; }
+.settings input[type="text"],
+.settings input[type="password"],
+.settings input[type="url"],
+.settings select {
+  width: 100%;
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 10px 12px;
+  color: var(--ink);
+  background: #0e1014;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  outline: none;
+}
+.settings input:focus, .settings select:focus { border-color: #5a3220; }
+.settings input:disabled, .settings select:disabled { opacity: 0.55; }
+.settings .check { grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; font-size: 13px; }
+.settings .check input { accent-color: var(--ember); width: 16px; height: 16px; }
+.settings .dim { text-transform: none; letter-spacing: 0; }
+.settings-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.settings-actions button { padding: 10px 16px; }
+.settings-banner { margin: 0; padding: 10px 12px; border: 1px solid var(--warn); color: var(--warn); font-size: 13px; }
+.settings-banner[hidden] { display: none; }
+#settings-status[data-tone="ok"] { color: var(--ok); }
+#settings-status[data-tone="bad"] { color: var(--bad); }
+.settings p { margin: 0; }
+.camera[hidden] { display: none; }
+.linkish {
+  font: inherit;
+  color: var(--hot);
+  background: none;
+  border: 0;
+  padding: 0 4px 0 0;
+  text-decoration: underline;
+  cursor: pointer;
+}
 
 .tag-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .tag {

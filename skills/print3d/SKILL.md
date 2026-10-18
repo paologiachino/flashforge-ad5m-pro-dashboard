@@ -1,6 +1,6 @@
 ---
 name: print3d
-description: Design and 3D print physical objects on a FlashForge Adventurer 5M. Use whenever the user asks to design, model, make, or print an object — "3d print me a flower", "design a bracket", "make a phone stand".
+description: Design and 3D print physical objects on a FlashForge Adventurer 5M or 5M Pro. Use whenever the user asks to design, model, make, or print an object — "3d print me a flower", "design a bracket", "make a phone stand".
 ---
 
 # Prompt to print
@@ -101,10 +101,21 @@ printer is busy, and refuses to release an item that was never approved.
 
 ## This printer
 
-FlashForge Adventurer 5M. 220 x 220 x 220 mm. 0.4 mm nozzle.
+FlashForge Adventurer 5M or 5M Pro. 220 x 220 x 220 mm. 0.4 mm nozzle.
+
+The model is set in the dashboard's Settings (saved to `printer.json`), and
+`scad_slice` uses it when `printer` is not passed. If `printer_status` reports a
+different model than the one you are slicing for, stop and tell the user.
+
+The **5M Pro** is enclosed and has a camera: ABS and ASA are possible
+("Flashforge Generic ABS", "Flashforge Generic ASA"). Keep it closed for those;
+for PLA suggest opening the lid or door to avoid heat creep. The plain **5M** is
+open-frame: stick to PLA and PETG.
 
 Usually PLA, sometimes PETG. Slicing defaults to PLA — always ask, never assume.
 PETG runs 255 C against PLA's 220 C, so slicing one as the other ruins the print.
+
+Talk to the user in the language they write in.
 
 PETG welds itself to the PEI plate and can tear the coating off. Remind them to
 glue-stick the bed first, every time.

@@ -107,7 +107,7 @@ Needed only for printing and the dashboard. Slicing works without it.
 
 On the printer, enable LAN mode and read off its **IP address, serial number and check code**.
 
-Copy `printer.example.json` to `printer.json` at the **repo root** and fill those three fields. That is the only place they live — the MCP server and the dashboard both read it.
+Easiest: start the dashboard (step 7) and fill in **Settings** from a browser on this computer. It tests the connection, then writes `~/.print3d/printer.json` (mode 600), which both the dashboard and the MCP server read. Alternatively copy `printer.example.json` to `~/.print3d/printer.json` or to `printer.json` at the repo root (gitignored) and fill the fields by hand. Never commit it.
 
 Ask the user for these — they are on the printer's screen and cannot be discovered. The `printer_discover` tool finds the IP, but not the other two.
 
@@ -195,6 +195,21 @@ End to end, using the MCP tools only:
 
 Report which steps passed. Then tell the user to restart their agent so the
 server loads, and that `print3d` is ready.
+
+## macOS
+
+`docs/SETUP-macOS.md` in the repo is the tested macOS walkthrough. The short
+version:
+
+- `brew install uv node@22` and `brew install --cask openscad@snapshot`.
+- The MCP server finds Homebrew's OpenSCAD and `/Applications/Flash Studio.app`
+  on its own, so no path env vars are needed for a standard install.
+- Printer login goes in `~/.print3d/printer.json` — easiest through the
+  dashboard's **Settings** page, which writes it with mode 600.
+- Run the dashboard with Node 22 (`/opt/homebrew/opt/node@22/bin/node server.js`)
+  and start it at login with `macos/com.print3d.dashboard.plist` (see the doc).
+- Optional extra MCP servers: `mcp-for-blender` (Blender) and `orca-mcp`
+  (OrcaSlicer CLI). `orca-mcp` 0.1.0 needs `uvx --with "mcp<2" orca-mcp`.
 
 ## Notes
 

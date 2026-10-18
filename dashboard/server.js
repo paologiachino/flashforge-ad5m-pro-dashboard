@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Adventurer 5M dashboard: projects, review queue, print history.
+// Flashforge Adventurer 5M / 5M Pro dashboard: projects, review queue, print
+// history, live camera and printer settings.
 //
 // The printer is only ever read (/detail, plus its camera while someone is
 // watching). Nothing here starts, pauses, cancels or uploads a job — the agent
@@ -9,8 +10,9 @@
 import http from "node:http";
 import {
   readFileSync, existsSync, statSync, readdirSync, watch,
-  mkdirSync, copyFileSync, writeFileSync,
+  mkdirSync, copyFileSync, writeFileSync, chmodSync,
 } from "node:fs";
+import { createConnection } from "node:net";
 import { join, dirname, basename, extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { networkInterfaces, homedir } from "node:os";
@@ -35,6 +37,12 @@ const fileCfg = existsSync(join(ROOT, "config.json"))
   ? JSON.parse(readFileSync(join(ROOT, "config.json"), "utf8").replace(/^﻿/, ""))
   : {};
 
+// The printer login lives in printer.json, never in the repo. Settings saves
+// back to whichever file was loaded, or to ~/.print3d/printer.json when there
+// is none yet - the same places the openscad MCP server reads.
+const PRINTER_DEFAULT_FILE = process.env.PRINTER_CONFIG || join(homedir(), ".print3d", "printer.json");
+let printerFile = null;
+
 function loadPrinterFile() {
   const candidates = [
     process.env.PRINTER_CONFIG,
@@ -47,13 +55,17 @@ function loadPrinterFile() {
     if (!existsSync(p)) continue;
     try {
       const j = JSON.parse(readFileSync(p, "utf8").replace(/^﻿/, ""));
-      if (j && (j.ip || j.serial || j.checkCode)) return j;
+      if (j && (j.ip || j.serial || j.checkCode)) { printerFile = p; return j; }
     } catch { /* skip bad json */ }
   }
   return {};
 }
 
 const printer = loadPrinterFile();
+
+// Values set in the environment win over printer.json, so Settings cannot
+// change them. Reported to the UI rather than silently ignored.
+const ENV_LOCKED = ["PRINTER_IP", "PRINTER_SERIAL", "PRINTER_CHECKCODE"].filter((k) => process.env[k]);
 
 // Your models are yours and live outside this repo — point `library` in
 // config.json at wherever you keep them. With no config at all we fall back to
@@ -64,7 +76,19 @@ const CFG = {
   ip: process.env.PRINTER_IP || printer.ip || "",
   serial: process.env.PRINTER_SERIAL || printer.serial || "",
   checkCode: process.env.PRINTER_CHECKCODE || printer.checkCode || "",
+  // "" = detect from the printer. Shown in the header and used by the MCP
+  // server to pick slicer profiles.
+  model: printer.model || "",
+  // The 5M Pro ships a camera; on the plain 5M it is an add-on.
+  camera: printer.camera !== false,
+  cameraUrl: printer.cameraUrl || fileCfg.cameraUrl || "",
   port: Number(process.env.DASH_PORT || fileCfg.port || 3470),
+  // Port 80 lets a phone open http://<host> with no port, but needs root on
+  // Linux. Set "listen80": false in config.json to skip it.
+  listen80: fileCfg.listen80 !== false,
+  // Settings can change where the dashboard points, so by default only a
+  // browser on this computer may save them.
+  allowRemoteSettings: fileCfg.allowRemoteSettings === true,
   library: LIBRARY,
   projectsRoot: resolve(process.env.PROJECTS_ROOT || fileCfg.projectsRoot || join(LIBRARY, "projects")),
   // The database describes the library, not the code, so it lives with the
@@ -84,9 +108,10 @@ const CFG = {
     : fileCfg.gcodeDirs) || [LIBRARY],
 };
 
-if (!CFG.ip || !CFG.serial || !CFG.checkCode) {
-  console.error("Missing printer ip / serial / checkCode. Copy printer.example.json to printer.json in the ai-3d-print repo.");
-  process.exit(1);
+const configured = () => Boolean(CFG.ip && CFG.serial && CFG.checkCode);
+
+if (!configured()) {
+  console.log("Printer not configured yet - open the dashboard and go to Settings.");
 }
 
 mkdirSync(CFG.projectsRoot, { recursive: true });
@@ -116,12 +141,28 @@ let printerHits = 0;
 
 const liveViewers = () => [...clients].filter((c) => c.live).length;
 
-async function printerPost(path, body = {}) {
+// Product ids from /detail. Firmware has been seen sending both a decimal
+// number (36) and a zero-padded hex string ("0024"), so accept either.
+const PIDS = { 35: "Adventurer 5M", 36: "Adventurer 5M Pro", 38: "AD5X" };
+
+function modelFromPid(pid) {
+  const s = String(pid ?? "").trim();
+  if (!s) return "";
+  const n = /^0[0-9a-f]{3}$/i.test(s) ? parseInt(s, 16) : Number(s);
+  return PIDS[n] || "";
+}
+
+const modelName = () => CFG.model || modelFromPid(lastStatus.detail?.pid) || "Adventurer 5M";
+
+async function printerPost(path, body = {}, creds = CFG) {
+  if (!creds.ip || !creds.serial || !creds.checkCode) {
+    throw new Error("printer not configured - open Settings");
+  }
   printerHits += 1;
-  const r = await fetch(`http://${CFG.ip}:${PORT_PRINTER}${path}`, {
+  const r = await fetch(`http://${creds.ip}:${PORT_PRINTER}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ serialNumber: CFG.serial, checkCode: CFG.checkCode, ...body }),
+    body: JSON.stringify({ serialNumber: creds.serial, checkCode: creds.checkCode, ...body }),
     signal: AbortSignal.timeout(8000),
   });
   const t = await r.text();
@@ -144,10 +185,13 @@ async function poll(force = false) {
     try { trackPrint(lastStatus.detail); }
     catch (e) { console.error("history:", e.message); }
   } catch (e) {
+    const m = String(e.cause?.code || e.message || e);
     lastStatus = {
       online: false,
       detail: lastStatus.detail,
-      error: String(e.message || e),
+      error: /timeout|aborted|EHOSTDOWN|EHOSTUNREACH|ETIMEDOUT/i.test(m)
+        ? `no answer from ${CFG.ip}: printer off or asleep?`
+        : /ECONNREFUSED/.test(m) ? `${CFG.ip} refused: is LAN mode on?` : m,
       ts: Date.now(),
       printerIp: CFG.ip,
     };
@@ -348,6 +392,9 @@ function inLibrary(p) {
 function statePayload() {
   return {
     ...lastStatus,
+    configured: configured(),
+    model: modelName(),
+    camera: CFG.camera,
     stale: !lastStatus.ts || Date.now() - lastStatus.ts > CFG.pollMs * 3,
     pollMs: CFG.pollMs,
     filament: {
@@ -388,8 +435,10 @@ function broadcast() {
 // than trusting the upstream multipart framing, so a viewer that joins mid
 // stream always starts on a whole frame.
 
-const CAMERA_URL = process.env.CAMERA_URL || fileCfg.cameraUrl || `http://${CFG.ip}:8080/?action=stream`;
-const SNAPSHOT_URL = CAMERA_URL.replace("action=stream", "action=snapshot");
+// Settings > what the printer reports > MJPG-Streamer's usual address.
+const cameraUrl = () => process.env.CAMERA_URL || CFG.cameraUrl ||
+  lastStatus.detail?.cameraStreamUrl || (CFG.ip ? `http://${CFG.ip}:8080/?action=stream` : "");
+const snapshotUrl = () => cameraUrl().replace("action=stream", "action=snapshot");
 const SOI = Buffer.from([0xff, 0xd8]);
 const EOI = Buffer.from([0xff, 0xd9]);
 const BOUNDARY = "camframe";
@@ -428,12 +477,19 @@ function camData(chunk) {
 function camStart() {
   if (cam.req || !cam.viewers.size) return;
   clearTimeout(cam.retry);
-  const req = http.get(CAMERA_URL, (up) => {
-    if (up.statusCode !== 200) { up.resume(); return camFail(req, `camera answered HTTP ${up.statusCode}`); }
-    up.on("data", (c) => { if (cam.req === req) camData(c); });
-    up.on("end", () => camFail(req, "camera stream ended"));
-    up.on("error", (e) => camFail(req, e.message));
-  });
+  let req;
+  try {
+    req = http.get(cameraUrl(), (up) => {
+      if (up.statusCode !== 200) { up.resume(); return camFail(req, `camera answered HTTP ${up.statusCode}`); }
+      up.on("data", (c) => { if (cam.req === req) camData(c); });
+      up.on("end", () => camFail(req, "camera stream ended"));
+      up.on("error", (e) => camFail(req, e.message));
+    });
+  } catch (e) {
+    // A malformed camera URL from Settings throws synchronously.
+    cam.error = String(e.message || e);
+    return;
+  }
   // Socket idle timeout: a stalled stream is dropped and retried.
   req.setTimeout(10000, () => req.destroy(new Error("camera did not respond")));
   req.on("error", (e) => camFail(req, e.message));
@@ -455,6 +511,24 @@ function camStop() {
   cam.req = null;
   cam.buf = Buffer.alloc(0);
   req?.destroy();
+}
+
+// After Settings changes the printer or camera address: drop the old
+// connection and, if anyone is watching, reconnect to the new one.
+function camRestart() {
+  clearTimeout(cam.retry);
+  const req = cam.req;
+  cam.req = null;
+  cam.buf = Buffer.alloc(0);
+  cam.last = null;
+  cam.error = "";
+  req?.destroy();
+  if (!CFG.camera) {
+    for (const res of cam.viewers) res.end();
+    cam.viewers.clear();
+    return;
+  }
+  camStart();
 }
 
 // --- routes ----------------------------------------------------------------
@@ -487,6 +561,8 @@ on("POST", /^\/api\/refresh$/, async (req, res) => {
 });
 
 on("GET", /^\/api\/camera\/stream$/, (req, res) => {
+  if (!CFG.camera) return json(res, 404, { error: "camera disabled in Settings" });
+  if (!cameraUrl()) return json(res, 503, { error: "printer not configured - open Settings" });
   res.writeHead(200, {
     "Content-Type": `multipart/x-mixed-replace; boundary=${BOUNDARY}`,
     "Cache-Control": "no-store",
@@ -505,16 +581,128 @@ on("GET", /^\/api\/camera\/stream$/, (req, res) => {
 
 on("GET", /^\/api\/camera\/snapshot$/, async (req, res) => {
   const headers = { "Content-Disposition": `inline; filename="camera-${Date.now()}.jpg"` };
+  if (!CFG.camera) return json(res, 404, { error: "camera disabled in Settings" });
   if (cam.last && Date.now() - cam.lastTs < 2000) return send(res, 200, "image/jpeg", cam.last, { headers });
+  if (!snapshotUrl()) return json(res, 503, { error: "printer not configured - open Settings" });
   let r;
-  try { r = await fetch(SNAPSHOT_URL, { signal: AbortSignal.timeout(8000) }); }
+  try { r = await fetch(snapshotUrl(), { signal: AbortSignal.timeout(8000) }); }
   catch (e) { return json(res, 502, { error: `camera unreachable: ${e.cause?.code || e.message}` }); }
   if (!r.ok) return json(res, 502, { error: `camera answered HTTP ${r.status}` });
   send(res, 200, "image/jpeg", Buffer.from(await r.arrayBuffer()), { headers });
 });
 
+// --- settings --------------------------------------------------------------
+//
+// The check code is write-only: it is never sent back to a browser. Saving is
+// limited to this computer unless config.json sets allowRemoteSettings.
+
+const canEditSettings = (req) => CFG.allowRemoteSettings || isLoopback(req);
+const MODELS = ["", ...Object.values(PIDS)];
+const IP_RE = /^(?:\d{1,3}\.){3}\d{1,3}$|^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i;
+const CODE_RE = /^[A-Za-z0-9]{4,40}$/;
+
+function settingsPayload(req) {
+  const edit = canEditSettings(req);
+  return {
+    configured: configured(),
+    canEdit: edit,
+    ip: CFG.ip,
+    // The serial is half the login; show it in full only where it can be edited.
+    serial: edit ? CFG.serial : CFG.serial.replace(/.(?=.{4})/g, "•"),
+    checkCodeSet: Boolean(CFG.checkCode),
+    model: CFG.model,
+    detectedModel: modelFromPid(lastStatus.detail?.pid),
+    camera: CFG.camera,
+    cameraUrl: CFG.cameraUrl,
+    cameraUrlInUse: cameraUrl(),
+    models: MODELS,
+    envLocked: ENV_LOCKED,
+    file: edit ? (printerFile || PRINTER_DEFAULT_FILE) : null,
+  };
+}
+
+// Validate a Settings form. An empty check code keeps the saved one, so the
+// form never needs to hold it.
+function settingsFromBody(b) {
+  const out = {
+    ip: String(b.ip ?? CFG.ip).trim(),
+    serial: String(b.serial ?? CFG.serial).trim(),
+    checkCode: String(b.checkCode || "").trim() || CFG.checkCode,
+    model: String(b.model ?? CFG.model).trim(),
+    camera: b.camera === undefined ? CFG.camera : Boolean(b.camera),
+    cameraUrl: String(b.cameraUrl ?? CFG.cameraUrl).trim(),
+  };
+  if (!IP_RE.test(out.ip)) throw new Error("IP address looks wrong");
+  if (!CODE_RE.test(out.serial)) throw new Error("serial number looks wrong (letters and digits only)");
+  if (!CODE_RE.test(out.checkCode)) throw new Error("check code looks wrong (letters and digits only)");
+  if (!MODELS.includes(out.model)) throw new Error(`model must be one of: ${MODELS.filter(Boolean).join(", ")}`);
+  if (out.cameraUrl && !/^https?:\/\/[^\s]+$/i.test(out.cameraUrl)) throw new Error("camera URL must start with http://");
+  return out;
+}
+
+on("GET", /^\/api\/settings$/, (req, res) => json(res, 200, settingsPayload(req)));
+
+on("POST", /^\/api\/settings\/test$/, async (req, res) => {
+  if (!canEditSettings(req)) return json(res, 403, { error: "open the dashboard on the computer that runs it to change Settings" });
+  let s;
+  try { s = settingsFromBody(await readJson(req)); }
+  catch (e) { return json(res, 400, { error: e.message }); }
+  try {
+    const j = await printerPost("/detail", {}, s);
+    const d = j.detail || {};
+    json(res, 200, {
+      ok: true,
+      model: modelFromPid(d.pid) || `unknown (pid ${d.pid})`,
+      firmware: d.firmwareVersion || "?",
+      status: d.status || "?",
+      camera: Boolean(d.cameraStreamUrl),
+    });
+  } catch (e) {
+    const m = String(e.cause?.code || e.message || e);
+    const hint = /ECONNREFUSED/.test(m) ? "port 8898 refused: is LAN mode on?"
+      : /timeout|ETIMEDOUT|EHOSTUNREACH|EHOSTDOWN|aborted/i.test(m) ? "no answer: wrong IP, or printer off / asleep"
+      : m;
+    json(res, 200, { ok: false, error: hint });
+  }
+});
+
+on("POST", /^\/api\/settings\/discover$/, async (req, res) => {
+  if (!canEditSettings(req)) return json(res, 403, { error: "open the dashboard on the computer that runs it to change Settings" });
+  json(res, 200, await discoverPrinters());
+});
+
+on("POST", /^\/api\/settings$/, async (req, res) => {
+  if (!canEditSettings(req)) return json(res, 403, { error: "open the dashboard on the computer that runs it to change Settings" });
+  let s;
+  try { s = settingsFromBody(await readJson(req)); }
+  catch (e) { return json(res, 400, { error: e.message }); }
+
+  const file = printerFile || PRINTER_DEFAULT_FILE;
+  let existing = {};
+  try { existing = JSON.parse(readFileSync(file, "utf8")); } catch { /* new file */ }
+  const out = { ...existing, ip: s.ip, serial: s.serial, checkCode: s.checkCode, model: s.model, camera: s.camera };
+  if (s.cameraUrl) out.cameraUrl = s.cameraUrl; else delete out.cameraUrl;
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify(out, null, 2) + "\n", { mode: 0o600 });
+  chmodSync(file, 0o600);
+  printerFile = file;
+
+  const printerChanged = s.ip !== CFG.ip || s.serial !== CFG.serial;
+  if (!ENV_LOCKED.includes("PRINTER_IP")) CFG.ip = s.ip;
+  if (!ENV_LOCKED.includes("PRINTER_SERIAL")) CFG.serial = s.serial;
+  if (!ENV_LOCKED.includes("PRINTER_CHECKCODE")) CFG.checkCode = s.checkCode;
+  Object.assign(CFG, { model: s.model, camera: s.camera, cameraUrl: s.cameraUrl });
+  if (printerChanged) lastStatus = { online: false, detail: null, error: "not polled yet", ts: 0, printerIp: CFG.ip };
+  console.log(`settings saved to ${file} (printer ${CFG.ip})`);
+
+  camRestart();
+  await poll(true);
+  json(res, 200, settingsPayload(req));
+});
+
 on("GET", /^\/api\/camera$/, (req, res) => json(res, 200, {
-  url: CAMERA_URL,
+  enabled: CFG.camera,
+  url: cameraUrl(),
   viewers: cam.viewers.size,
   connected: Boolean(cam.req),
   lastFrameAgoMs: cam.lastTs ? Date.now() - cam.lastTs : null,
@@ -805,6 +993,31 @@ function lanAddrs() {
   return out;
 }
 
+// Printers announce themselves over UDP in a format nobody has documented, so
+// look for port 8898 across this computer's /24 networks instead.
+function probe(ip, ms = 400) {
+  return new Promise((done) => {
+    const s = createConnection({ host: ip, port: PORT_PRINTER });
+    const end = (v) => { s.destroy(); done(v); };
+    s.setTimeout(ms);
+    s.on("connect", () => end(ip));
+    s.on("timeout", () => end(null));
+    s.on("error", () => end(null));
+  });
+}
+
+async function discoverPrinters() {
+  const bases = [...new Set(lanAddrs().map((a) => a.split(".").slice(0, 3).join(".")))];
+  const found = [];
+  for (const base of bases) {
+    const targets = Array.from({ length: 254 }, (_, i) => `${base}.${i + 1}`);
+    for (let i = 0; i < targets.length; i += 64) {
+      found.push(...(await Promise.all(targets.slice(i, i + 64).map((t) => probe(t)))).filter(Boolean));
+    }
+  }
+  return { found, scanned: bases.map((b) => `${b}.0/24`) };
+}
+
 async function onRequest(req, res) {
   const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
   const path = url.pathname;
@@ -843,10 +1056,12 @@ function listenOn(port) {
   return s;
 }
 
-console.log("Adventurer 5M dashboard — projects, queue, history (printer is read-only)");
+console.log("Flashforge Adventurer 5M / 5M Pro dashboard — projects, queue, history (printer is read-only)");
 console.log(`  library  ${CFG.library}`);
 console.log(`  projects ${CFG.projectsRoot}`);
 console.log(`  db       ${CFG.db}`);
 listenOn(CFG.port);
-listenOn(80);
-console.log(`Printer ${CFG.ip}:${PORT_PRINTER} is read only while a tab has auto-refresh on.`);
+if (CFG.listen80 && CFG.port !== 80) listenOn(80);
+console.log(configured()
+  ? `Printer ${CFG.ip}:${PORT_PRINTER} is read only while a tab has auto-refresh on.`
+  : "No printer yet: open Settings in the dashboard.");

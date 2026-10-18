@@ -521,6 +521,7 @@ for (const b of modesEl.querySelectorAll("button")) {
     if (b.dataset.view === "projects") { state.project = null; state.item = null; }
     setView(b.dataset.view);
     if (b.dataset.view === "history") loadHistory();
+    if (b.dataset.view === "settings") loadSettings();
   });
 }
 
@@ -567,7 +568,7 @@ let camRetry = null;
 
 function camConnect() {
   clearTimeout(camRetry);
-  camNote.textContent = "connessione…";
+  camNote.textContent = "connecting…";
   camImg.src = `/api/camera/stream?t=${Date.now()}`;
 }
 
@@ -580,7 +581,7 @@ function camDisconnect() {
 function setCamera(on) {
   camOn = on;
   camFrame.hidden = !on;
-  camToggle.textContent = on ? "Nascondi camera" : "Mostra camera";
+  camToggle.textContent = on ? "Hide camera" : "Show camera";
   camToggle.setAttribute("aria-expanded", on ? "true" : "false");
   if (on) camConnect(); else camDisconnect();
 }
@@ -591,7 +592,7 @@ camImg.addEventListener("load", () => {
 });
 camImg.addEventListener("error", () => {
   if (!camOn || !camImg.src.includes("/api/camera/")) return;
-  camNote.textContent = "camera non raggiungibile, riprovo…";
+  camNote.textContent = "camera unreachable, retrying…";
   camRetry = setTimeout(camConnect, 5000);
 });
 
@@ -605,6 +606,100 @@ $("#camera-full").addEventListener("click", () => {
 document.addEventListener("visibilitychange", () => {
   if (!camOn) return;
   if (document.hidden) camDisconnect(); else camConnect();
+});
+
+/* --- settings ---------------------------------------------------------- */
+
+const settingsForm = $("#settings-form");
+const settingsStatus = $("#settings-status");
+
+function settingsSay(text, tone = "") {
+  settingsStatus.textContent = text;
+  settingsStatus.dataset.tone = tone;
+}
+
+function settingsBody() {
+  const f = settingsForm.elements;
+  return {
+    ip: f.ip.value.trim(),
+    serial: f.serial.value.trim(),
+    checkCode: f.checkCode.value.trim(),
+    model: f.model.value,
+    camera: f.camera.checked,
+    cameraUrl: f.cameraUrl.value.trim(),
+  };
+}
+
+function fillSettings(s) {
+  const f = settingsForm.elements;
+  f.ip.value = s.ip || "";
+  f.serial.value = s.serial || "";
+  f.checkCode.value = "";
+  f.checkCode.placeholder = s.checkCodeSet ? "saved — leave empty to keep it" : "from the printer screen";
+  f.checkCode.required = !s.checkCodeSet;
+  $("#settings-model").innerHTML = s.models
+    .map((m) => `<option value="${esc(m)}">${m ? esc(m) : "Detect automatically"}</option>`).join("");
+  f.model.value = s.model || "";
+  $("#settings-detected").textContent = s.detectedModel ? `Printer reports: ${s.detectedModel}` : "";
+  f.camera.checked = s.camera;
+  f.cameraUrl.placeholder = s.cameraUrlInUse || "http://<printer-ip>:8080/?action=stream";
+  f.cameraUrl.value = s.cameraUrl || "";
+  $("#settings-camera-note").textContent = "Leave empty to use the address the printer reports.";
+  $("#settings-file").textContent = s.file ? `Saved to ${s.file} (readable only by your user).` : "";
+
+  const banner = $("#settings-banner");
+  const notes = [];
+  if (!s.canEdit) notes.push("Settings can only be changed from a browser on the computer that runs the dashboard.");
+  if (s.envLocked.length) notes.push(`Set by environment variables, so changes here are ignored: ${s.envLocked.join(", ")}.`);
+  if (!s.configured && s.canEdit) notes.push("No printer configured yet. Fill in the fields below, test, then save.");
+  banner.hidden = !notes.length;
+  banner.textContent = notes.join(" ");
+  for (const el of settingsForm.querySelectorAll("input, select, button")) el.disabled = !s.canEdit;
+}
+
+async function loadSettings() {
+  try { fillSettings(await api("/api/settings")); settingsSay(""); }
+  catch (e) { settingsSay(String(e.message), "bad"); }
+}
+
+async function withBusy(btn, label, fn) {
+  const was = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = label;
+  try { await fn(); } finally { btn.disabled = false; btn.textContent = was; }
+}
+
+$("#settings-test").addEventListener("click", (e) => withBusy(e.currentTarget, "Testing…", async () => {
+  settingsSay("contacting the printer…");
+  try {
+    const r = await api("/api/settings/test", { method: "POST", body: settingsBody() });
+    if (r.ok) settingsSay(`Connected: ${r.model}, firmware ${r.firmware}, ${r.status}${r.camera ? ", camera found" : ""}.`, "ok");
+    else settingsSay(`Could not connect: ${r.error}`, "bad");
+  } catch (err) { settingsSay(String(err.message), "bad"); }
+}));
+
+$("#settings-discover").addEventListener("click", (e) => withBusy(e.currentTarget, "…", async () => {
+  const out = $("#settings-found");
+  out.textContent = "scanning the local network (about 10 s)…";
+  try {
+    const r = await api("/api/settings/discover", { method: "POST" });
+    if (!r.found.length) { out.textContent = `Nothing answered on port 8898 in ${r.scanned.join(", ")}. Is LAN mode on?`; return; }
+    out.innerHTML = `Found: ${r.found.map((ip) => `<button type="button" class="linkish" data-ip="${esc(ip)}">${esc(ip)}</button>`).join(" ")}`;
+    for (const b of out.querySelectorAll("[data-ip]")) {
+      b.addEventListener("click", () => { settingsForm.elements.ip.value = b.dataset.ip; });
+    }
+    if (r.found.length === 1) settingsForm.elements.ip.value = r.found[0];
+  } catch (err) { out.textContent = String(err.message); }
+}));
+
+settingsForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  withBusy($("#settings-save"), "Saving…", async () => {
+    try {
+      fillSettings(await api("/api/settings", { method: "POST", body: settingsBody() }));
+      settingsSay("Saved. The dashboard now uses these settings.", "ok");
+    } catch (err) { settingsSay(String(err.message), "bad"); }
+  });
 });
 
 /* --- status ------------------------------------------------------------ */
@@ -627,6 +722,14 @@ function applyState(msg) {
 
   const d = msg.detail || {};
   const online = Boolean(msg.online);
+
+  if (msg.model) {
+    $("#model-name").textContent = msg.model;
+    document.title = `${msg.model} · dashboard`;
+  }
+  const camBlock = $("#camera-block");
+  if (msg.camera === false && !camBlock.hidden) { setCamera(false); camBlock.hidden = true; }
+  else if (msg.camera !== false) camBlock.hidden = false;
   const status = online ? (d.status || "unknown") : (msg.ts ? "offline" : "not polled");
   stateEl.dataset.state = status;
   stateEl.dataset.stale = msg.stale && !state.live ? "1" : "";
@@ -671,7 +774,8 @@ function applyState(msg) {
   const printing = ["printing", "pause", "paused"].includes(status);
 
   if (state.view === "print") {
-    if (!online && msg.ts) setNote("printer offline");
+    if (msg.configured === false) setNote("no printer configured — open Settings");
+    else if (!online && msg.ts) setNote("printer offline");
     else if (!msg.ts) setNote("auto refresh is off — tap Refresh for a reading");
     else if (printing && layer === 0) setNote("levelling / heating — plastic has not started");
     else setNote("");

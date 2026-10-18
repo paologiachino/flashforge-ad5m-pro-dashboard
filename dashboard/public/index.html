@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>5M · workshop</title>
+  <title>Flashforge · dashboard</title>
   <link rel="icon" href="/favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -20,7 +20,7 @@
     <div class="brand">
       <span class="mark" aria-hidden="true"></span>
       <div>
-        <div class="name">Adventurer 5M</div>
+        <div class="name" id="model-name">Adventurer 5M</div>
         <div class="sub" data-field="identity">not polled yet</div>
       </div>
     </div>
@@ -30,6 +30,7 @@
       <button type="button" data-view="projects">Projects</button>
       <button type="button" data-view="queue">Queue</button>
       <button type="button" data-view="history">History</button>
+      <button type="button" data-view="settings">Settings</button>
     </nav>
 
     <div class="job-chip" data-field="job">no job</div>
@@ -100,15 +101,15 @@
       <section class="block camera" id="camera-block">
         <div class="refresh-row">
           <span class="k">camera</span>
-          <button type="button" class="ghost-btn" id="camera-toggle" aria-expanded="false" aria-controls="camera-frame">Mostra camera</button>
+          <button type="button" class="ghost-btn" id="camera-toggle" aria-expanded="false" aria-controls="camera-frame">Show camera</button>
         </div>
         <div class="camera-frame" id="camera-frame" hidden>
-          <img id="camera-img" alt="Vista live della camera della stampante">
+          <img id="camera-img" alt="Live view from the printer camera">
           <div class="refresh-row">
-            <span class="mono tiny" id="camera-note">connessione…</span>
+            <span class="mono tiny" id="camera-note">connecting…</span>
             <span class="camera-actions">
-              <a class="ghost-btn" id="camera-snap" href="/api/camera/snapshot" target="_blank" rel="noopener">Foto</a>
-              <button type="button" class="ghost-btn" id="camera-full">Schermo intero</button>
+              <a class="ghost-btn" id="camera-snap" href="/api/camera/snapshot" target="_blank" rel="noopener">Photo</a>
+              <button type="button" class="ghost-btn" id="camera-full">Fullscreen</button>
             </span>
           </div>
         </div>
@@ -185,6 +186,63 @@
       <div class="stat-row" id="stat-row"></div>
     </div>
     <div class="pane-body" id="history-body"></div>
+  </section>
+
+  <!-- SETTINGS ---------------------------------------------------------- -->
+  <section class="view view-settings pane">
+    <div class="pane-head">
+      <h2>Settings</h2>
+      <p class="hint">On the printer: Settings → Network → turn on LAN mode. The screen then shows the IP address, serial number and check code.</p>
+    </div>
+    <div class="pane-body">
+      <form class="settings" id="settings-form" autocomplete="off">
+        <p class="settings-banner" id="settings-banner" hidden></p>
+
+        <label class="field">
+          <span class="k">printer IP address</span>
+          <span class="field-row">
+            <input type="text" name="ip" inputmode="decimal" placeholder="192.168.x.x" required>
+            <button type="button" class="ghost-btn" id="settings-discover">Find</button>
+          </span>
+          <span class="tiny" id="settings-found"></span>
+        </label>
+
+        <label class="field">
+          <span class="k">serial number</span>
+          <input type="text" name="serial" placeholder="SN…" spellcheck="false" required>
+        </label>
+
+        <label class="field">
+          <span class="k">check code</span>
+          <input type="password" name="checkCode" spellcheck="false" autocomplete="new-password">
+          <span class="tiny" id="settings-code-note">Never shown again once saved.</span>
+        </label>
+
+        <label class="field">
+          <span class="k">model</span>
+          <select name="model" id="settings-model"></select>
+          <span class="tiny" id="settings-detected"></span>
+        </label>
+
+        <label class="field check">
+          <input type="checkbox" name="camera">
+          <span>Show the camera panel <span class="tiny">(built into the 5M Pro, an add-on on the 5M)</span></span>
+        </label>
+
+        <label class="field">
+          <span class="k">camera URL <span class="dim">(optional)</span></span>
+          <input type="url" name="cameraUrl" spellcheck="false">
+          <span class="tiny" id="settings-camera-note"></span>
+        </label>
+
+        <div class="settings-actions">
+          <button type="button" class="ghost-btn" id="settings-test">Test connection</button>
+          <button type="submit" class="go" id="settings-save">Save</button>
+        </div>
+        <p class="mono tiny" id="settings-status" role="status"></p>
+        <p class="tiny" id="settings-file"></p>
+      </form>
+    </div>
   </section>
 
   <!-- prompt ------------------------------------------------------------ -->

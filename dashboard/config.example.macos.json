@@ -1,0 +1,16 @@
+{
+  "port": 3470,
+  "listen80": true,
+  "allowRemoteSettings": false,
+  "pollMs": 2000,
+  "library": "/Users/YOUR_USER/Documents/3D/Models",
+  "projectsRoot": "/Users/YOUR_USER/Documents/3D/Models/projects",
+  "gcodeDirs": [
+    "/Users/YOUR_USER/Documents/3D/Models"
+  ],
+  "filament": {
+    "spoolGrams": 1000,
+    "spoolCost": 20,
+    "currency": "€"
+  }
+}

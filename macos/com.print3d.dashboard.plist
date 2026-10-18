@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Template: macos/install-dashboard-agent.sh fills in __NODE__, __REPO__ and __LOGDIR__.
+     Node is started directly: macOS privacy protection blocks /bin/sh from
+     reading ~/Documents when launched at login. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.print3d.dashboard</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE__</string>
+    <string>server.js</string>
+  </array>
+  <key>WorkingDirectory</key><string>__REPO__/dashboard</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>__LOGDIR__/dashboard.log</string>
+  <key>StandardErrorPath</key><string>__LOGDIR__/dashboard.log</string>
+</dict>
+</plist>
