@@ -107,7 +107,7 @@ Open it at `http://127.0.0.1:3470`, or from other devices on the same network at
 | `gcodeDirs` | `[library]` | Where to look for G-code for the preview. |
 | `port` | `3470` | Main port. |
 | `listen80` | `true` | Also listen on port 80. Needs root on Linux: set it to `false` there. |
-| `allowRemoteSettings` | `false` | Allow changing Settings from other devices on the network. |
+| `allowRemoteSettings` | `false` | Allow other devices on the network to change Settings, import projects, and create projects and items (what the MCP server does). Needed when the dashboard runs on another machine than Claude, e.g. in Docker on a server. Only enable it on a trusted network, or behind a reverse proxy that restricts access. |
 | `pollMs` | `2000` | How often to read the printer while auto refresh is on. |
 | `filament` | 1100 g, $20 | Spool weight and price, used to estimate print cost. |
 
@@ -136,6 +136,8 @@ The environment variables `PRINTER_IP`, `PRINTER_SERIAL`, `PRINTER_CHECKCODE` an
 | GET | `/api/export` | ZIP of all projects. `?projects=a,b` for some, `&gcode=0` to leave G-code out. |
 | POST | `/api/import` | Body: the ZIP. `?mode=skip` (default) or `copy`, `&dryRun=1` to preview. Localhost only, unless `allowRemoteSettings`. |
 | GET | `/api/projects/<slug>/makerworld` | MakerWorld upload package (ZIP). |
+| POST | `/api/projects` | `{ name, notes, tags }`: create a project and its folder. Localhost only, unless `allowRemoteSettings`. |
+| POST | `/api/items` | `{ project, name, stl, scad?, gcode?, note?, tags? }`: add an item or a revision. The paths are on the dashboard's filesystem. Localhost only, unless `allowRemoteSettings`. |
 | PATCH | `/api/projects/<id>` | `{ name, tags, notes, status }`. Name max 120 characters (the folder name does not change). Tags are lower-cased, max 30, 40 characters each. |
 | POST | `/api/projects/<slug>/images` | Body: the image (JPEG, PNG, WebP, GIF; 25 MB max). `?name=&caption=`. |
 | GET · PATCH · DELETE | `/api/projects/<slug>/images/<id>` | The image file; `{ caption }`; delete (also removes the file). |

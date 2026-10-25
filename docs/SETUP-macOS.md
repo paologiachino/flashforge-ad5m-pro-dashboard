@@ -340,8 +340,11 @@ easy to re-apply on future versions.
 Other useful per-installation settings:
 
 - **Filament cost:** `filament` in `config.json` (spool weight, price, currency).
-- **Changing Settings from a phone:** `"allowRemoteSettings": true`. Not recommended on
-  untrusted networks.
+- **Changing Settings from a phone, or running the dashboard on another machine:**
+  `"allowRemoteSettings": true`. It also lets other devices import projects and create
+  projects and items, which is what the MCP server does when `DASH_URL` points to a
+  dashboard on a server (the file paths it sends must exist on that server too). Not
+  recommended on untrusted networks.
 - **Firmware:** the printer API is unofficial and may change. If something stops working
   after an update, *Test connection* shows the error.
 

@@ -595,7 +595,9 @@ on("GET", /^\/api\/camera\/snapshot$/, async (req, res) => {
 // --- settings --------------------------------------------------------------
 //
 // The check code is write-only: it is never sent back to a browser. Saving is
-// limited to this computer unless config.json sets allowRemoteSettings.
+// limited to this computer unless config.json sets allowRemoteSettings. The same
+// switch governs the other endpoints that change data (creating projects and
+// adding items), so the MCP server can run on another machine than the dashboard.
 
 const canEditSettings = (req) => CFG.allowRemoteSettings || isLoopback(req);
 const MODELS = ["", ...Object.values(PIDS)];
@@ -1213,7 +1215,7 @@ async function onRequest(req, res) {
     if (r.method !== req.method) continue;
     const m = path.match(r.pattern);
     if (!m) continue;
-    if (r.local && !isLoopback(req)) return json(res, 403, { error: "this endpoint is local only" });
+    if (r.local && !canEditSettings(req)) return json(res, 403, { error: "this endpoint is local only (config.json: allowRemoteSettings)" });
     try { return await r.handler(req, res, m, url); }
     catch (e) {
       console.error(`${req.method} ${path}:`, e.message);
