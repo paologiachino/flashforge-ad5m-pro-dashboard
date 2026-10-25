@@ -853,13 +853,14 @@ async function renderProjects(force = false) {
     .map((t) => `<button type="button" class="tag ${state.tag === t.name ? "on" : ""}" data-tag="${esc(t.name)}">${esc(t.name)}</button>`)
     .join("");
 
+  const notice = projectEdit.notice ? `<p class="notice" role="status">${esc(projectEdit.notice)}</p>` : "";
   if (!projectCache.projects.length) {
-    body.innerHTML = `<p class="empty">${state.search || state.tag
+    body.innerHTML = `${notice}<p class="empty">${state.search || state.tag
       ? "Nothing matches." : "No projects yet. The agent creates one when it starts a design."}</p>`;
     return;
   }
 
-  body.innerHTML = `<div class="cards">${projectCache.projects.map((p) => `
+  body.innerHTML = `${notice}<div class="cards">${projectCache.projects.map((p) => `
     <article class="card" data-project="${esc(p.slug)}">
       <div class="card-head">
         <span class="card-name">${esc(p.name)}</span>
@@ -972,7 +973,7 @@ async function downloadMakerworld(_btn, slug) {
 
 /* --- project tags, description and images ------------------------------ */
 
-const projectEdit = { error: "", uploading: "" };
+const projectEdit = { error: "", uploading: "", notice: "" };
 
 async function reloadProject() {
   state.project = await api(`/api/projects/${encodeURIComponent(state.project.slug)}`);
@@ -1035,6 +1036,24 @@ async function projectEditClick(t) {
   const p = state.project;
   const imgUrl = (id) => `/api/projects/${encodeURIComponent(p.slug)}/images/${id}`;
   if (t.dataset.tagRemove !== undefined) return saveProject({ tags: p.tags.filter((x) => x !== t.dataset.tagRemove) });
+  if (t.dataset.deleteProject !== undefined) {
+    const typed = await ask(
+      `Delete "${p.name}"? Type ${p.slug} to confirm`,
+      p.slug,
+    );
+    if (typed === null) return;
+    if (typed.trim() !== p.slug) { projectEdit.error = `Not deleted: you typed "${typed.trim()}", not ${p.slug}.`; return renderProjects(true); }
+    try {
+      const out = await api(`/api/projects/${encodeURIComponent(p.slug)}?confirm=${encodeURIComponent(p.slug)}`, { method: "DELETE" });
+      projectEdit.error = "";
+      projectEdit.notice = `Deleted "${out.name}" (folder ${out.folder}). A backup ZIP is kept for ${out.keepDays} days next to the dashboard database: ${out.backup}. Import it to restore.`;
+      state.project = null;
+      return loadProjects();
+    } catch (err) {
+      projectEdit.error = `Not deleted: ${err.message}`;
+      return renderProjects(true);
+    }
+  }
   if (t.dataset.editName !== undefined) {
     const name = await ask("Project title", "e.g. Shoe horn with hook", p.name);
     const clean = (name || "").replace(/\s+/g, " ").trim();
@@ -1078,6 +1097,8 @@ async function projectEditClick(t) {
 }
 
 async function openProject(slug) {
+  projectEdit.notice = "";
+  projectEdit.error = "";
   state.project = await api(`/api/projects/${encodeURIComponent(slug)}`);
   state.item = null;
   setView("projects");
@@ -1131,6 +1152,7 @@ function renderProjectDetail(body) {
       <a class="ghost-btn" href="/api/export?projects=${encodeURIComponent(p.slug)}" download>Export</a>
       <button type="button" class="ghost-btn" data-makerworld="${esc(p.slug)}" ${mwState.busy === p.slug ? "disabled" : ""}>${mwState.busy === p.slug ? "Preparing…" : "MakerWorld package"}</button>
       <a class="ghost-btn" href="https://makerworld.com/" target="_blank" rel="noopener noreferrer">Open MakerWorld ↗</a>
+      <button type="button" class="ghost-btn danger" data-delete-project>Delete project</button>
     </div>
     ${mwState.slug === p.slug && mwState.note ? `<p class="tiny" id="makerworld-note">${esc(mwState.note)}</p>` : ""}
 
@@ -1389,11 +1411,11 @@ async function loadHistory() {
 /* --- delegated clicks -------------------------------------------------- */
 
 document.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-project],[data-back],[data-item],[data-review],[data-enqueue],[data-release],[data-remove],[data-up],[data-tag],[data-outcome],[data-makerworld],[data-import-mode],[data-import-cancel],[data-tag-remove],[data-edit-name],[data-edit-notes],[data-image-add],[data-image-delete],[data-image-caption],[data-image-cover],[data-image-move]");
+  const t = e.target.closest("[data-project],[data-back],[data-item],[data-review],[data-enqueue],[data-release],[data-remove],[data-up],[data-tag],[data-outcome],[data-makerworld],[data-import-mode],[data-import-cancel],[data-tag-remove],[data-edit-name],[data-edit-notes],[data-delete-project],[data-image-add],[data-image-delete],[data-image-caption],[data-image-cover],[data-image-move]");
   if (!t || t.disabled) return;
 
   try {
-    if (t.matches("[data-tag-remove],[data-edit-name],[data-edit-notes],[data-image-add],[data-image-delete],[data-image-caption],[data-image-cover],[data-image-move]")) {
+    if (t.matches("[data-tag-remove],[data-edit-name],[data-edit-notes],[data-delete-project],[data-image-add],[data-image-delete],[data-image-caption],[data-image-cover],[data-image-move]")) {
       return await projectEditClick(t);
     }
     if (t.dataset.makerworld) return downloadMakerworld(t, t.dataset.makerworld);

@@ -110,6 +110,7 @@ Open it at `http://127.0.0.1:3470`, or from other devices on the same network at
 | `allowRemoteSettings` | `false` | Allow other devices on the network to change Settings, import projects, and create projects and items (what the MCP server does). Needed when the dashboard runs on another machine than Claude, e.g. in Docker on a server. Only enable it on a trusted network, or behind a reverse proxy that restricts access. |
 | `pollMs` | `2000` | How often to read the printer while auto refresh is on. |
 | `filament` | 1100 g, $20 | Spool weight and price, used to estimate print cost. |
+| `deletedKeepDays` | `30` | How long backups of deleted projects are kept. |
 
 ### Printer details (`~/.print3d/printer.json`)
 
@@ -138,6 +139,7 @@ The environment variables `PRINTER_IP`, `PRINTER_SERIAL`, `PRINTER_CHECKCODE` an
 | GET | `/api/projects/<slug>/makerworld` | MakerWorld upload package (ZIP). |
 | POST | `/api/projects` | `{ name, notes, tags }`: create a project and its folder. Localhost only, unless `allowRemoteSettings`. |
 | POST | `/api/items` | `{ project, name, stl, scad?, gcode?, note?, tags? }`: add an item or a revision. The paths are on the dashboard's filesystem. Localhost only, unless `allowRemoteSettings`. |
+| DELETE | `/api/projects/<slug>?confirm=<slug>` | Delete a project and its folder under `projectsRoot`, after writing a backup ZIP to `<database folder>/deleted/`. Refused while one of its parts is ready or printing in the queue. Localhost only, unless `allowRemoteSettings`. |
 | PATCH | `/api/projects/<id>` | `{ name, tags, notes, status }`. Name max 120 characters (the folder name does not change). Tags are lower-cased, max 30, 40 characters each. |
 | POST | `/api/projects/<slug>/images` | Body: the image (JPEG, PNG, WebP, GIF; 25 MB max). `?name=&caption=`. |
 | GET · PATCH · DELETE | `/api/projects/<slug>/images/<id>` | The image file; `{ caption }`; delete (also removes the file). |
@@ -162,6 +164,19 @@ try to leave the projects folder (`../`, absolute paths) are ignored.
 
 Use it to back up the library, move it to another computer, or bring in a folder of
 downloaded models.
+
+## Deleting a project
+
+**Delete project** (red, on the project page) asks you to type the project's id (its
+folder name, e.g. `shoe-horn`) to confirm. The dashboard then:
+
+1. refuses if one of the project's parts is *ready* or *printing* in the queue;
+2. writes a backup ZIP of the project to `deleted/` next to the database (kept for
+   `deletedKeepDays`, 30 by default) — **Import** it to restore the project;
+3. deletes the project, its items, revisions, notes, images and queue entries (the print
+   history stays, unlinked from the deleted parts);
+4. deletes the project folder, but only if it is inside `projectsRoot`: the library root
+   and any folder elsewhere are never removed.
 
 ## Publishing to MakerWorld
 

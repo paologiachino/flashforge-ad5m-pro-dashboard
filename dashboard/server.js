@@ -795,6 +795,70 @@ on("PATCH", /^\/api\/projects\/(\d+)$/, async (req, res, m) => {
   json(res, 200, p);
 });
 
+// --- deleting a project ------------------------------------------------------
+//
+// Removes the project, its items, revisions, notes, images and queue entries
+// (print history stays, unlinked), then its folder under projectsRoot. A ZIP
+// export is written next to the database first, so a mistake can be undone
+// with Import; those backups are kept for DELETED_KEEP_DAYS.
+
+const DELETED_DIR = () => join(dirname(CFG.db), "deleted");
+const DELETED_KEEP_DAYS = Number(fileCfg.deletedKeepDays) || 30;
+
+function pruneDeletedBackups() {
+  const dir = DELETED_DIR();
+  if (!existsSync(dir)) return;
+  const cutoff = Date.now() - DELETED_KEEP_DAYS * 86400e3;
+  for (const f of readdirSync(dir)) {
+    const p = join(dir, f);
+    try { if (f.endsWith(".zip") && statSync(p).mtimeMs < cutoff) rmSync(p, { force: true }); }
+    catch { /* best effort */ }
+  }
+}
+
+// Only a folder strictly inside projectsRoot may be removed: never the root
+// itself, never a path a database row points somewhere else.
+function deletableDir(dir) {
+  const root = resolve(CFG.projectsRoot);
+  const d = resolve(dir || "");
+  return d.startsWith(root + sep) && d !== root;
+}
+
+// ?confirm=<slug> must repeat the project's slug.
+on("DELETE", /^\/api\/projects\/([^/]+)$/, async (req, res, m, url) => {
+  const p = db.project(decodeURIComponent(m[1]));
+  if (!p) return json(res, 404, { error: "no such project" });
+  if (url.searchParams.get("confirm") !== p.slug) {
+    return json(res, 400, { error: `to delete, confirm with the project's id "${p.slug}"` });
+  }
+  const busy = db.get(
+    `SELECT i.name, q.state FROM queue q JOIN items i ON i.id = q.item_id
+     WHERE i.project_id = ? AND q.state IN ('ready', 'printing')`, p.id);
+  if (busy) return json(res, 409, { error: `"${busy.name}" is ${busy.state} in the print queue — finish or remove it first` });
+
+  let backup;
+  try {
+    const out = exportProjects(db, { slugs: [p.slug] });
+    mkdirSync(DELETED_DIR(), { recursive: true });
+    backup = join(DELETED_DIR(), `${p.slug}-${new Date().toISOString().replace(/[:.]/g, "-")}.zip`);
+    writeFileSync(backup, out.zip);
+  } catch (e) {
+    return json(res, 500, { error: `could not back the project up first, so nothing was deleted: ${e.message}` });
+  }
+
+  db.tx(() => db.run("DELETE FROM projects WHERE id = ?", p.id));
+  let folder = "not found";
+  if (!deletableDir(p.dir)) folder = `kept: ${p.dir} is not inside the projects folder`;
+  else if (existsSync(p.dir)) {
+    try { rmSync(p.dir, { recursive: true, force: true }); folder = "deleted"; }
+    catch (e) { folder = `could not delete ${p.dir}: ${e.message}`; }
+  }
+  pruneDeletedBackups();
+  console.log(`project deleted: ${p.slug} (folder ${folder}; backup ${basename(backup)})`);
+  broadcast();
+  json(res, 200, { deleted: p.slug, name: p.name, folder, backup: basename(backup), keepDays: DELETED_KEEP_DAYS });
+}, { local: true });
+
 // --- project images ----------------------------------------------------------
 //
 // Uploaded from any browser on the LAN (a phone next to the printer is the
