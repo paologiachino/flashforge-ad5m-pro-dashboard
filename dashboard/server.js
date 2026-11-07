@@ -1036,6 +1036,7 @@ on("POST", /^\/api\/items$/, async (req, res) => {
 
   const name = String(b.name || "").trim();
   if (!name) return json(res, 400, { error: "name required" });
+  try { checkSourceUrl(b.sourceUrl); } catch (e) { return json(res, 400, { error: e.message }); }
 
   // Copy the sources into the project directory so a project is self-contained.
   const stored = {};
@@ -1062,7 +1063,17 @@ on("POST", /^\/api\/items$/, async (req, res) => {
 
 // Shared by POST /api/items and POST /api/items/upload: find or create the item
 // (same slug = same item), add a revision for the stored files, notify clients.
+// Source links (where a revision was drawn) must be http(s): they end up in an <a href>.
+function checkSourceUrl(v) {
+  if (v === undefined || v === null || v === "") return null;
+  let ok = false;
+  try { const u = new URL(String(v)); ok = u.protocol === "http:" || u.protocol === "https:"; } catch { /* invalid */ }
+  if (!ok) throw Object.assign(new Error("source must be an http(s) URL"), { status: 400 });
+  return String(v);
+}
+
 function addItemRevision(project, b, stored) {
+  const sourceUrl = checkSourceUrl(b.sourceUrl);
   const name = String(b.name || "").trim();
   const slug = slugify(b.slug || name);
   let item = db.get("SELECT * FROM items WHERE project_id = ? AND slug = ?", project.id, slug);
@@ -1077,7 +1088,7 @@ function addItemRevision(project, b, stored) {
     filamentG: st?.filamentG ?? null,
     filamentType: st?.filamentType ?? null,
     note: String(b.note || ""),
-    sourceUrl: b.sourceUrl || null,
+    sourceUrl,
   });
   console.log(`item revision: ${project.slug}/${slug} v${rev.rev}`);
   broadcast();
@@ -1389,7 +1400,7 @@ async function onRequest(req, res) {
     try { return await r.handler(req, res, m, url); }
     catch (e) {
       console.error(`${req.method} ${path}:`, e.message);
-      if (!res.headersSent) return json(res, 500, { error: String(e.message || e) });
+      if (!res.headersSent) return json(res, e.status >= 400 && e.status < 500 ? e.status : 500, { error: String(e.message || e) });
       return res.end();
     }
   }

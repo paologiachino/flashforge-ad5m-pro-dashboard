@@ -1,7 +1,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, existsSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -239,4 +239,16 @@ test("names that slugify to nothing still get unique revisions", async () => {
   const b = await post(S.base, "/api/items/upload", payload({ name: "日本", files: f }), auth);
   assert.equal(a.status, 200);
   assert.equal(b.status, 200);
+});
+
+test("POST /api/items rejects a non-http(s) sourceUrl with 400 (loopback)", async () => {
+  const stl = join(S.tmp, "real.stl"); // a real file, so only the URL can cause the 400
+  writeFileSync(stl, "solid x\nendsolid x\n");
+  for (const sourceUrl of ["javascript:alert(1)", "data:text/html,x", "not a url"]) {
+    const r = await post(S.base, "/api/items", { project: "bracket-project", name: "evil", stl, sourceUrl });
+    assert.equal(r.status, 400, sourceUrl);
+    assert.match((await r.json()).error, /http/);
+  }
+  const ok = await post(S.base, "/api/items", { project: "bracket-project", name: "fine", stl, sourceUrl: "https://example.com/x" });
+  assert.equal(ok.status, 200);
 });

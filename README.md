@@ -139,11 +139,20 @@ The environment variables `PRINTER_IP`, `PRINTER_SERIAL`, `PRINTER_CHECKCODE` an
 | GET | `/api/projects/<slug>/makerworld` | MakerWorld upload package (ZIP). |
 | POST | `/api/projects` | `{ name, notes, tags }`: create a project and its folder. Localhost only, unless `allowRemoteSettings`. |
 | POST | `/api/items` | `{ project, name, stl, scad?, gcode?, note?, tags? }`: add an item or a revision. The paths are on the dashboard's filesystem. Localhost only, unless `allowRemoteSettings`. |
+| POST | `/api/items/upload` | Token-protected (`Authorization: Bearer <SKETCH_UPLOAD_TOKEN>`; 404 when the variable is unset). JSON body `{ project, name, note?, source?, files: { stl, scad?, sketch? } }`, each file `{ name, base64 }` or `{ name, text }`; 60 MB max. Adds a revision, stored as `<item-slug>-r<rev><ext>`; `source` (http/https only) becomes the "Open in Sketch" link. Not limited to localhost. |
 | DELETE | `/api/projects/<slug>?confirm=<slug>` | Delete a project and its folder under `projectsRoot`, after writing a backup ZIP to `<database folder>/deleted/`. Refused while one of its parts is ready or printing in the queue. Localhost only, unless `allowRemoteSettings`. |
 | PATCH | `/api/projects/<id>` | `{ name, tags, notes, status }`. Name max 120 characters (the folder name does not change). Tags are lower-cased, max 30, 40 characters each. |
 | POST | `/api/projects/<slug>/images` | Body: the image (JPEG, PNG, WebP, GIF; 25 MB max). `?name=&caption=`. |
 | GET · PATCH · DELETE | `/api/projects/<slug>/images/<id>` | The image file; `{ caption }`; delete (also removes the file). |
 | POST | `/api/projects/<slug>/images/order` | `{ ids }` in the new order; the first is the cover. |
+
+## Sketch2D
+
+[sketch2d](https://github.com/paologiachino/sketch2d) is a companion web app for drawing a 2D sketch with typed dimensions and extruding it into a part. It can send the result to this dashboard as a new item or a new revision of an existing one.
+
+Uploads are accepted only when `SKETCH_UPLOAD_TOKEN` is set in the dashboard's environment; the sender must present the same value as a bearer token. Without it the endpoint answers 404. Use a long random value (`openssl rand -hex 24`). The request body format is described in the sketch2d design spec (section 7, "Dashboard side").
+
+A revision uploaded this way carries the URL of its sketch, and the review screen shows an **Open in Sketch** link (http and https URLs only). The dashboard does not slice uploads: they appear as "Not sliced yet" until sliced as usual.
 
 ## Export and import
 
