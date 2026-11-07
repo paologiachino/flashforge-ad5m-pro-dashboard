@@ -367,13 +367,20 @@ function isLoopback(req) {
 
 function readJson(req, limit = 4e6) {
   return new Promise((ok, bad) => {
-    let b = "";
+    const tooLarge = () => Object.assign(new Error("body too large"), { status: 413 });
+    const declared = Number(req.headers["content-length"]);
+    if (declared > limit) { req.resume(); return bad(tooLarge()); }
+    const chunks = [];
+    let n = 0, over = false;
     req.on("data", (c) => {
-      b += c;
-      if (b.length > limit) { req.destroy(); bad(Object.assign(new Error("body too large"), { status: 413 })); }
+      if (over) return; // keep draining so the client can read our 413
+      n += c.length;
+      if (n > limit) { over = true; chunks.length = 0; bad(tooLarge()); return; }
+      chunks.push(c);
     });
     req.on("end", () => {
-      try { ok(b ? JSON.parse(b) : {}); }
+      if (over) return;
+      try { const b = Buffer.concat(chunks).toString("utf8"); ok(b ? JSON.parse(b) : {}); }
       catch { bad(new Error("bad json")); }
     });
     req.on("error", bad);
@@ -1096,7 +1103,12 @@ on("POST", /^\/api\/items\/upload$/, async (req, res) => {
 
   let b;
   try { b = await readJson(req, UPLOAD_LIMIT); }
-  catch (e) { return json(res, e.status || 400, { error: e.message }); }
+  catch (e) {
+    if (e.status === 413) {
+      return send(res, 413, "application/json", JSON.stringify({ error: e.message }), { headers: { Connection: "close" } });
+    }
+    return json(res, e.status || 400, { error: e.message });
+  }
   if (!b || typeof b !== "object" || Array.isArray(b)) return json(res, 400, { error: "json object required" });
 
   const name = String(b.name || "").trim();
@@ -1130,7 +1142,7 @@ on("POST", /^\/api\/items\/upload$/, async (req, res) => {
     if (typeof f.base64 === "string") data = Buffer.from(f.base64, "base64");
     else if (typeof f.text === "string") data = Buffer.from(f.text, "utf8");
     else return json(res, 400, { error: `files.${key} needs base64 or text` });
-    planned.push({ col, ext, stem: slugify(base.slice(0, -ext.length)), data });
+    planned.push({ col, ext, data });
   }
 
   const slug = slugify(name);
@@ -1144,7 +1156,7 @@ on("POST", /^\/api\/items\/upload$/, async (req, res) => {
   try {
     mkdirSync(dir, { recursive: true });
     for (const p of planned) {
-      const dest = join(dir, `${p.stem}-r${revNo}${p.ext}`);
+      const dest = join(dir, `${slug}-r${revNo}${p.ext}`);
       writeFileSync(dest, p.data, { flag: "wx" });
       written.push(dest);
       if (p.col) stored[p.col] = dest;

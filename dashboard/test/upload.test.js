@@ -141,7 +141,7 @@ test("bad extension -> 400, nothing written", async () => {
 });
 
 test("path traversal in the file name is reduced to the base name", async () => {
-  const p = payload({ name: "trav", files: { stl: { name: "../../x.stl", base64: "QQ==" } } });
+  const p = payload({ name: "x", files: { stl: { name: "../../x.stl", base64: "QQ==" } } });
   const r = await post(S.base, "/api/items/upload", p, auth);
   assert.equal(r.status, 200);
   const j = await r.json();
@@ -165,8 +165,8 @@ test("non-ASCII item name is slugified, files stay in the project folder", async
   assert.equal(j.item.slug, slugify(name));
   assert.ok(inside(j.revision.stl_path));
   assert.ok(existsSync(j.revision.stl_path));
-  assert.equal(j.revision.stl_path, join(projectDir, `${slugify("Staffa à 90°")}-r1.stl`));
-  assert.ok(existsSync(join(projectDir, `${slugify("Staffa à 90°")}-r1.sketch.json`)));
+  assert.equal(j.revision.stl_path, join(projectDir, `${slugify(name)}-r1.stl`));
+  assert.ok(existsSync(join(projectDir, `${slugify(name)}-r1.sketch.json`)));
 });
 
 test("validation errors", async () => {
@@ -196,13 +196,47 @@ test("optional fields may be omitted", async () => {
   assert.equal(j.revision.scad_path, null);
 });
 
-test("body over 60 MB -> 413", async () => {
+test("body over 60 MB -> real 413 response", async () => {
   const big = "A".repeat(61 * 1024 * 1024);
-  let status;
-  try {
-    status = (await post(S.base, "/api/items/upload", payload({ files: { stl: { name: "b.stl", base64: big } } }), auth)).status;
-  } catch {
-    status = 413; // connection reset while streaming the oversized body
-  }
-  assert.equal(status, 413);
+  const r = await post(S.base, "/api/items/upload", payload({ files: { stl: { name: "b.stl", base64: big } } }), auth);
+  assert.equal(r.status, 413);
+});
+
+test("413 is also sent when the body is streamed without Content-Length", async () => {
+  const chunk = Buffer.alloc(1024 * 1024, 65);
+  const body = new ReadableStream({
+    pull(c) { if (body.n++ < 62) c.enqueue(chunk); else c.close(); },
+  });
+  body.n = 0;
+  const r = await fetch(S.base + "/api/items/upload", {
+    method: "POST", headers: { "content-type": "application/json", ...auth }, body, duplex: "half",
+  });
+  assert.equal(r.status, 413);
+});
+
+test("non-ASCII text spanning chunk boundaries is stored byte-identical", async () => {
+  const text = "// à ° è 日本 \u{1F600}\n".repeat(40000); // ~1 MB
+  const stl = Buffer.alloc(700 * 1024, 7).toString("base64");
+  const p = payload({ name: "utf8", files: { stl: { name: "u.stl", base64: stl }, scad: { name: "u.scad", text } } });
+  const j = await (await post(S.base, "/api/items/upload", p, auth)).json();
+  assert.equal(readFileSync(j.revision.scad_path, "utf8"), text);
+  assert.deepEqual(readFileSync(j.revision.scad_path), Buffer.from(text, "utf8"));
+});
+
+test("two items uploading the same file name do not collide", async () => {
+  const f = { stl: { name: "part.stl", base64: "QQ==" } };
+  const r1 = await post(S.base, "/api/items/upload", payload({ name: "one", files: f }), auth);
+  const r2 = await post(S.base, "/api/items/upload", payload({ name: "two", files: f }), auth);
+  assert.equal(r1.status, 200);
+  assert.equal(r2.status, 200);
+  assert.equal((await r1.json()).revision.stl_path, join(projectDir, "one-r1.stl"));
+  assert.equal((await r2.json()).revision.stl_path, join(projectDir, "two-r1.stl"));
+});
+
+test("names that slugify to nothing still get unique revisions", async () => {
+  const f = { stl: { name: "!!!.stl", base64: "QQ==" } };
+  const a = await post(S.base, "/api/items/upload", payload({ name: "日本", files: f }), auth);
+  const b = await post(S.base, "/api/items/upload", payload({ name: "日本", files: f }), auth);
+  assert.equal(a.status, 200);
+  assert.equal(b.status, 200);
 });
