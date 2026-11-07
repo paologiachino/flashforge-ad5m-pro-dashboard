@@ -122,6 +122,7 @@ Normally written by the Settings page. Format (see `printer.example.json`):
 
 The environment variables `PRINTER_IP`, `PRINTER_SERIAL`, `PRINTER_CHECKCODE` and
 `PRINTER_CONFIG` take precedence over the file. Settings tells you when they are set.
+Setting `PRINTER_CONFIG` pins that file and disables the other `printer.json` fallbacks.
 
 ## Dashboard API
 
@@ -148,9 +149,11 @@ The environment variables `PRINTER_IP`, `PRINTER_SERIAL`, `PRINTER_CHECKCODE` an
 
 ## Sketch2D
 
-[sketch2d](https://github.com/paologiachino/sketch2d) is a companion web app for drawing a 2D sketch with typed dimensions and extruding it into a part. It can send the result to this dashboard as a new item or a new revision of an existing one.
+sketch2d is a companion web app for drawing a 2D sketch with typed dimensions and extruding it into a part. It can send the result to this dashboard as a new item or a new revision of an existing one.
 
-Uploads are accepted only when `SKETCH_UPLOAD_TOKEN` is set in the dashboard's environment; the sender must present the same value as a bearer token. Without it the endpoint answers 404. Use a long random value (`openssl rand -hex 24`). The request body format is described in the sketch2d design spec (section 7, "Dashboard side").
+Uploads are accepted only when `SKETCH_UPLOAD_TOKEN` is set in the dashboard's environment; the sender must present the same value as a bearer token. Without it the endpoint answers 404. Use a long random value (`openssl rand -hex 24`).
+
+`POST /api/items/upload` takes a JSON body with `Authorization: Bearer <token>`: `project` (slug), `name` (the item; an existing item of that name gets a new revision), optional `note` (2000 characters max) and `source` (an http(s) URL of the sketch), and `files`: `stl` (required) and optional `scad` and `sketch`, each `{ "name": "<file>.stl|.scad|.sketch.json", "base64": "…" }` or `{ "name": "…", "text": "…" }`. The body is limited to 60 MB.
 
 A revision uploaded this way carries the URL of its sketch, and the review screen shows an **Open in Sketch** link (http and https URLs only). The dashboard does not slice uploads: they appear as "Not sliced yet" until sliced as usual.
 
