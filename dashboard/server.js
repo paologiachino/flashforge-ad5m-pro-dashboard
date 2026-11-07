@@ -16,6 +16,7 @@ import { createConnection } from "node:net";
 import { join, dirname, basename, extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { networkInterfaces, homedir } from "node:os";
+import { timingSafeEqual } from "node:crypto";
 import { parseGcode, encodeToolpath, gcodeStats } from "./gcode-parse.js";
 
 // node:sqlite landed in Node 22. Say so plainly rather than dying inside the
@@ -45,13 +46,14 @@ const PRINTER_DEFAULT_FILE = process.env.PRINTER_CONFIG || join(homedir(), ".pri
 let printerFile = null;
 
 function loadPrinterFile() {
-  const candidates = [
-    process.env.PRINTER_CONFIG,
+  // PRINTER_CONFIG pins the file: no fallbacks, so an isolated instance can
+  // never read (or later overwrite) a printer.json somewhere else.
+  const candidates = process.env.PRINTER_CONFIG ? [process.env.PRINTER_CONFIG] : [
     join(ROOT, "printer.json"),
     join(ROOT, "..", "printer.json"),
     join(homedir(), ".print3d", "printer.json"),
     join(homedir(), "source", "ai-3d-print", "printer.json"),
-  ].filter(Boolean);
+  ];
   for (const p of candidates) {
     if (!existsSync(p)) continue;
     try {
@@ -86,7 +88,7 @@ const CFG = {
   port: Number(process.env.DASH_PORT || fileCfg.port || 3470),
   // Port 80 lets a phone open http://<host> with no port, but needs root on
   // Linux. Set "listen80": false in config.json to skip it.
-  listen80: fileCfg.listen80 !== false,
+  listen80: process.env.DASH_LISTEN80 !== "0" && fileCfg.listen80 !== false,
   // Settings can change where the dashboard points, so by default only a
   // browser on this computer may save them.
   allowRemoteSettings: fileCfg.allowRemoteSettings === true,
@@ -364,15 +366,22 @@ function isLoopback(req) {
   return a === "127.0.0.1" || a === "::1" || a === "::ffff:127.0.0.1";
 }
 
-function readJson(req) {
+function readJson(req, limit = 4e6) {
   return new Promise((ok, bad) => {
-    let b = "";
+    const tooLarge = () => Object.assign(new Error("body too large"), { status: 413 });
+    const declared = Number(req.headers["content-length"]);
+    if (declared > limit) { req.resume(); return bad(tooLarge()); }
+    const chunks = [];
+    let n = 0, over = false;
     req.on("data", (c) => {
-      b += c;
-      if (b.length > 4e6) { req.destroy(); bad(new Error("body too large")); }
+      if (over) return; // keep draining so the client can read our 413
+      n += c.length;
+      if (n > limit) { over = true; chunks.length = 0; bad(tooLarge()); return; }
+      chunks.push(c);
     });
     req.on("end", () => {
-      try { ok(b ? JSON.parse(b) : {}); }
+      if (over) return;
+      try { const b = Buffer.concat(chunks).toString("utf8"); ok(b ? JSON.parse(b) : {}); }
       catch { bad(new Error("bad json")); }
     });
     req.on("error", bad);
@@ -1028,6 +1037,7 @@ on("POST", /^\/api\/items$/, async (req, res) => {
 
   const name = String(b.name || "").trim();
   if (!name) return json(res, 400, { error: "name required" });
+  try { checkSourceUrl(b.sourceUrl); } catch (e) { return json(res, 400, { error: e.message }); }
 
   // Copy the sources into the project directory so a project is self-contained.
   const stored = {};
@@ -1048,6 +1058,24 @@ on("POST", /^\/api\/items$/, async (req, res) => {
     return json(res, 400, { error: "an stl or gcode path is required" });
   }
 
+  const { item, rev } = addItemRevision(project, b, stored);
+  json(res, 200, { item, revision: rev });
+}, { local: true });
+
+// Source links (where a revision was drawn) must be http(s): they end up in an <a href>.
+function checkSourceUrl(v) {
+  if (v === undefined || v === null || v === "") return null;
+  let ok = false;
+  try { const u = new URL(String(v)); ok = u.protocol === "http:" || u.protocol === "https:"; } catch { /* invalid */ }
+  if (!ok) throw Object.assign(new Error("source must be an http(s) URL"), { status: 400 });
+  return String(v);
+}
+
+// Shared by POST /api/items and POST /api/items/upload: find or create the item
+// (same slug = same item), add a revision for the stored files, notify clients.
+function addItemRevision(project, b, stored) {
+  const sourceUrl = checkSourceUrl(b.sourceUrl);
+  const name = String(b.name || "").trim();
   const slug = slugify(b.slug || name);
   let item = db.get("SELECT * FROM items WHERE project_id = ? AND slug = ?", project.id, slug);
   if (!item) item = db.createItem({ projectId: project.id, name, slug, tags: b.tags || [] });
@@ -1061,11 +1089,101 @@ on("POST", /^\/api\/items$/, async (req, res) => {
     filamentG: st?.filamentG ?? null,
     filamentType: st?.filamentType ?? null,
     note: String(b.note || ""),
+    sourceUrl,
   });
   console.log(`item revision: ${project.slug}/${slug} v${rev.rev}`);
   broadcast();
-  json(res, 200, { item: db.item(item.id), revision: rev });
-}, { local: true });
+  return { item: db.item(item.id), rev };
+}
+
+// --- sketch upload: token-protected, JSON body (no multipart parser) --------
+
+const UPLOAD_LIMIT = 60 * 1024 * 1024;
+
+function uploadAuthorized(req) {
+  const token = process.env.SKETCH_UPLOAD_TOKEN || "";
+  const m = /^Bearer (.+)$/.exec(String(req.headers.authorization || ""));
+  if (!token || !m) return false;
+  const a = Buffer.from(m[1]);
+  const t = Buffer.from(token);
+  return a.length === t.length && timingSafeEqual(a, t);
+}
+
+on("POST", /^\/api\/items\/upload$/, async (req, res) => {
+  if (!process.env.SKETCH_UPLOAD_TOKEN) return json(res, 404, { error: "not found" });
+  if (!uploadAuthorized(req)) return json(res, 401, { error: "bad or missing token" });
+
+  let b;
+  try { b = await readJson(req, UPLOAD_LIMIT); }
+  catch (e) {
+    if (e.status === 413) {
+      return send(res, 413, "application/json", JSON.stringify({ error: e.message }), { headers: { Connection: "close" } });
+    }
+    return json(res, e.status || 400, { error: e.message });
+  }
+  if (!b || typeof b !== "object" || Array.isArray(b)) return json(res, 400, { error: "json object required" });
+
+  const name = String(b.name || "").trim();
+  if (!b.project) return json(res, 400, { error: "project required" });
+  if (!name) return json(res, 400, { error: "name required" });
+  const files = b.files && typeof b.files === "object" ? b.files : {};
+  if (!files.stl) return json(res, 400, { error: "files.stl required" });
+  const note = String(b.note || "");
+  if (note.length > 2000) return json(res, 400, { error: "note too long (2000 characters max)" });
+  let source = null;
+  if (b.source) {
+    try {
+      const u = new URL(String(b.source));
+      if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("scheme");
+      source = String(b.source);
+    } catch { return json(res, 400, { error: "source must be an http(s) URL" }); }
+  }
+
+  const project = db.project(String(b.project));
+  if (!project) return json(res, 404, { error: `no project "${b.project}"` });
+
+  // Decode and validate everything before touching the disk.
+  const spec = [["stl", "stlPath", ".stl"], ["scad", "scadPath", ".scad"], ["sketch", null, ".sketch.json"]];
+  const planned = [];
+  for (const [key, col, ext] of spec) {
+    const f = files[key];
+    if (!f) continue;
+    const base = basename(String(f.name || "").replaceAll("\\", "/"));
+    if (!base.toLowerCase().endsWith(ext)) return json(res, 400, { error: `files.${key}.name must end in ${ext}` });
+    let data;
+    if (typeof f.base64 === "string") data = Buffer.from(f.base64, "base64");
+    else if (typeof f.text === "string") data = Buffer.from(f.text, "utf8");
+    else return json(res, 400, { error: `files.${key} needs base64 or text` });
+    planned.push({ col, ext, data });
+  }
+
+  const slug = slugify(name);
+  const existing = db.get("SELECT id FROM items WHERE project_id = ? AND slug = ?", project.id, slug);
+  const last = existing ? db.get("SELECT MAX(rev) AS m FROM revisions WHERE item_id = ?", existing.id) : null;
+  const revNo = (last?.m || 0) + 1;
+
+  const dir = resolve(project.dir);
+  const written = [];
+  const stored = {};
+  try {
+    mkdirSync(dir, { recursive: true });
+    for (const p of planned) {
+      const dest = join(dir, `${slug}-r${revNo}${p.ext}`);
+      writeFileSync(dest, p.data, { flag: "wx" });
+      written.push(dest);
+      if (p.col) stored[p.col] = dest;
+    }
+  } catch (e) {
+    for (const f of written) rmSync(f, { force: true });
+    if (e.code === "EEXIST") return json(res, 409, { error: "a file for this revision already exists in the project" });
+    throw e;
+  }
+
+  let out;
+  try { out = addItemRevision(project, { name, note, sourceUrl: source }, stored); }
+  catch (e) { for (const f of written) rmSync(f, { force: true }); throw e; }
+  json(res, 200, { item: out.item, revision: out.rev });
+});
 
 on("GET", /^\/api\/items\/(\d+)$/, (req, res, m) => {
   const it = db.item(Number(m[1]));
@@ -1283,7 +1401,7 @@ async function onRequest(req, res) {
     try { return await r.handler(req, res, m, url); }
     catch (e) {
       console.error(`${req.method} ${path}:`, e.message);
-      if (!res.headersSent) return json(res, 500, { error: String(e.message || e) });
+      if (!res.headersSent) return json(res, e.status >= 400 && e.status < 500 ? e.status : 500, { error: String(e.message || e) });
       return res.end();
     }
   }

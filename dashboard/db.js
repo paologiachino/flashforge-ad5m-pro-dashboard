@@ -152,6 +152,8 @@ export function openDb(file) {
   mkdirSync(dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec(SCHEMA);
+  const cols = db.prepare("PRAGMA table_info(revisions)").all();
+  if (!cols.some((c) => c.name === "source_url")) db.exec("ALTER TABLE revisions ADD COLUMN source_url TEXT");
   return new Store(db);
 }
 
@@ -352,13 +354,13 @@ class Store {
     const r = this.run(
       `INSERT INTO revisions
         (item_id, rev, stl_path, scad_path, gcode_path, layer_count, est_seconds,
-         filament_g, filament_type, note, decision, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+         filament_g, filament_type, note, decision, created_at, source_url)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
       itemId, rev,
       data.stlPath || null, data.scadPath || null, data.gcodePath || null,
       data.layerCount ?? null, data.estSeconds ?? null,
       data.filamentG ?? null, data.filamentType || null,
-      data.note || "", ts,
+      data.note || "", ts, data.sourceUrl || null,
     );
     this.run("UPDATE items SET status = 'pending', updated_at = ? WHERE id = ?", ts, itemId);
     const it = this.get("SELECT project_id FROM items WHERE id = ?", itemId);

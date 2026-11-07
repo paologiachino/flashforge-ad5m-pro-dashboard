@@ -1250,6 +1250,9 @@ function renderReviewBar() {
     row("layers", r?.layer_count ? String(r.layer_count) : ""),
     row("material", r?.filament_type || ""),
     row("revision", r ? `v${r.rev}` : ""),
+    r && isHttpUrl(r.source_url)
+      ? `<div><span class="k">source</span><a href="${esc(r.source_url)}" target="_blank" rel="noopener">Open in Sketch</a></div>`
+      : "",
     row("status", it.status),
   ].filter(Boolean).join("");
 
@@ -1262,6 +1265,11 @@ function renderReviewBar() {
         </div>`).join("")}</div>`
     : "");
   facts.hidden = false;
+}
+
+function isHttpUrl(v) {
+  try { const u = new URL(String(v)); return u.protocol === "http:" || u.protocol === "https:"; }
+  catch { return false; }
 }
 
 async function decide(action) {

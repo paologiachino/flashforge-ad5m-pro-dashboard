@@ -19,3 +19,6 @@ dashboard/config.json
 
 # A library created by a default-config first run
 library/
+
+# Dev dashboard instance (.claude/launch.json)
+.dev/
