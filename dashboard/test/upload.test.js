@@ -252,3 +252,15 @@ test("POST /api/items rejects a non-http(s) sourceUrl with 400 (loopback)", asyn
   const ok = await post(S.base, "/api/items", { project: "bracket-project", name: "fine", stl, sourceUrl: "https://example.com/x" });
   assert.equal(ok.status, 200);
 });
+
+test("PRINTER_CONFIG pins the printer file: empty {} means unconfigured, file is that path", async () => {
+  const tmp = mkdtempSync(join(tmpdir(), "dash-pc-"));
+  dirs.push(tmp);
+  const cfg = join(tmp, "printer.json");
+  writeFileSync(cfg, "{}");
+  const S3 = await startServer({ PRINTER_CONFIG: cfg });
+  const j = await (await fetch(`${S3.base}/api/settings`)).json();
+  assert.equal(j.ip, "");
+  assert.equal(j.configured, false);
+  assert.equal(j.file, cfg);
+});

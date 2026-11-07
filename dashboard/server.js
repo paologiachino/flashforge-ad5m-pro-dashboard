@@ -46,13 +46,14 @@ const PRINTER_DEFAULT_FILE = process.env.PRINTER_CONFIG || join(homedir(), ".pri
 let printerFile = null;
 
 function loadPrinterFile() {
-  const candidates = [
-    process.env.PRINTER_CONFIG,
+  // PRINTER_CONFIG pins the file: no fallbacks, so an isolated instance can
+  // never read (or later overwrite) a printer.json somewhere else.
+  const candidates = process.env.PRINTER_CONFIG ? [process.env.PRINTER_CONFIG] : [
     join(ROOT, "printer.json"),
     join(ROOT, "..", "printer.json"),
     join(homedir(), ".print3d", "printer.json"),
     join(homedir(), "source", "ai-3d-print", "printer.json"),
-  ].filter(Boolean);
+  ];
   for (const p of candidates) {
     if (!existsSync(p)) continue;
     try {
