@@ -1061,8 +1061,6 @@ on("POST", /^\/api\/items$/, async (req, res) => {
   json(res, 200, { item, revision: rev });
 }, { local: true });
 
-// Shared by POST /api/items and POST /api/items/upload: find or create the item
-// (same slug = same item), add a revision for the stored files, notify clients.
 // Source links (where a revision was drawn) must be http(s): they end up in an <a href>.
 function checkSourceUrl(v) {
   if (v === undefined || v === null || v === "") return null;
@@ -1072,6 +1070,8 @@ function checkSourceUrl(v) {
   return String(v);
 }
 
+// Shared by POST /api/items and POST /api/items/upload: find or create the item
+// (same slug = same item), add a revision for the stored files, notify clients.
 function addItemRevision(project, b, stored) {
   const sourceUrl = checkSourceUrl(b.sourceUrl);
   const name = String(b.name || "").trim();

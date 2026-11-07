@@ -4,8 +4,11 @@
 # in the calling environment to enable POST /api/items/upload.
 cd "$(dirname "$0")/.." || exit 1
 D="$PWD/.dev"
-mkdir -p "$D"
+mkdir -p "$D/home"
+# os.homedir() follows $HOME: keep ~/.print3d/printer.json out of reach.
+export HOME="$D/home"
+[ -f "$D/printer.json" ] || echo "{}" > "$D/printer.json"
 export DASH_PORT=3471 DASH_LISTEN80=0
 export DASH_DB="$D/dash.db" PRINT_LIBRARY="$D/library" PROJECTS_ROOT="$D/projects" GCODE_DIRS="$D/gcode"
-export PRINTER_IP= PRINTER_SERIAL= PRINTER_CHECKCODE= PRINTER_CONFIG="$D/none.json"
+export PRINTER_IP= PRINTER_SERIAL= PRINTER_CHECKCODE= PRINTER_CONFIG="$D/printer.json"
 exec node dashboard/server.js
