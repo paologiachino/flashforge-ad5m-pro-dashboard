@@ -1087,7 +1087,7 @@ function addItemRevision(project, b, stored) {
     layerCount: st?.layerCount ?? null,
     estSeconds: st?.estSeconds ?? null,
     filamentG: st?.filamentG ?? null,
-    filamentType: st?.filamentType ?? null,
+    filamentType: b.filamentType ?? st?.filamentType ?? null,
     note: String(b.note || ""),
     sourceUrl,
   });
@@ -1099,6 +1099,18 @@ function addItemRevision(project, b, stored) {
 // --- sketch upload: token-protected, JSON body (no multipart parser) --------
 
 const UPLOAD_LIMIT = 60 * 1024 * 1024;
+const MATERIAL_TYPES = ["PLA", "PETG", "ABS", "ASA", "TPU", "other"];
+
+// Returns { type, line } for a valid material, or { error }.
+function checkMaterial(m) {
+  if (!m || typeof m !== "object" || Array.isArray(m)) return { error: "material must be an object" };
+  if (!MATERIAL_TYPES.includes(m.type)) return { error: `material.type must be one of ${MATERIAL_TYPES.join(", ")}` };
+  const name = typeof m.name === "string" ? m.name.trim() : "";
+  if (!name || name.length > 80) return { error: "material.name must be 1-80 characters" };
+  if (/[\u0000-\u001f\u007f]/.test(name)) return { error: "material.name must not contain control characters" };
+  if (typeof m.color !== "string" || !/^#[0-9a-fA-F]{6}$/.test(m.color)) return { error: "material.color must be #rrggbb" };
+  return { type: m.type, line: `Material: ${name} (${m.type})` };
+}
 
 function uploadAuthorized(req) {
   const token = process.env.SKETCH_UPLOAD_TOKEN || "";
@@ -1130,6 +1142,11 @@ on("POST", /^\/api\/items\/upload$/, async (req, res) => {
   if (!files.stl) return json(res, 400, { error: "files.stl required" });
   const note = String(b.note || "");
   if (note.length > 2000) return json(res, 400, { error: "note too long (2000 characters max)" });
+  let material = null;
+  if (b.material !== undefined && b.material !== null) {
+    material = checkMaterial(b.material);
+    if (material.error) return json(res, 400, { error: material.error });
+  } else if (b.material === null) return json(res, 400, { error: "material must be an object" });
   let source = null;
   if (b.source) {
     try {
@@ -1180,7 +1197,12 @@ on("POST", /^\/api\/items\/upload$/, async (req, res) => {
   }
 
   let out;
-  try { out = addItemRevision(project, { name, note, sourceUrl: source }, stored); }
+  try { out = addItemRevision(project, {
+    name,
+    note: material ? (note ? `${note}\n${material.line}` : material.line) : note,
+    filamentType: material?.type,
+    sourceUrl: source,
+  }, stored); }
   catch (e) { for (const f of written) rmSync(f, { force: true }); throw e; }
   json(res, 200, { item: out.item, revision: out.rev });
 });
