@@ -264,3 +264,42 @@ test("PRINTER_CONFIG pins the printer file: empty {} means unconfigured, file is
   assert.equal(j.configured, false);
   assert.equal(j.file, cfg);
 });
+
+const stlOnly = (name, extra = {}) => ({
+  project: "bracket-project", name, files: { stl: { name: `${name}.stl`, base64: "QQ==" } }, ...extra,
+});
+
+test("material sets filament_type and appends a Material line to the note", async () => {
+  const material = { name: "PETG black", type: "PETG", color: "#1a1a1a" };
+  const r = await post(S.base, "/api/items/upload", stlOnly("mat-a", { note: "my note", material }), auth);
+  assert.equal(r.status, 200);
+  const j = await r.json();
+  assert.equal(j.revision.filament_type, "PETG");
+  assert.equal(j.revision.note, "my note\nMaterial: PETG black (PETG)");
+  const r2 = await post(S.base, "/api/items/upload", stlOnly("mat-b", { material: { ...material, type: "other" } }), auth);
+  const j2 = await r2.json();
+  assert.equal(j2.revision.filament_type, "other");
+  assert.equal(j2.revision.note, "Material: PETG black (other)");
+});
+
+test("invalid material -> 400 and nothing is written", async () => {
+  const ok = { name: "PLA", type: "PLA", color: "#ffffff" };
+  const bad = [
+    "PETG", null, [], { ...ok, type: "NYLON" }, { ...ok, type: "pla" }, { ...ok, name: "" }, { ...ok, name: "   " },
+    { ...ok, name: "x".repeat(81) }, { ...ok, name: 5 }, { ...ok, name: "a\nb" }, { ...ok, color: "red" },
+    { ...ok, color: "#fff" }, { ...ok, color: "#gggggg" }, { name: "PLA", type: "PLA" },
+  ];
+  for (const material of bad) {
+    const r = await post(S.base, "/api/items/upload", stlOnly("mat-bad", { material }), auth);
+    assert.equal(r.status, 400, JSON.stringify(material));
+    assert.ok((await r.json()).error);
+  }
+  assert.ok(!existsSync(join(projectDir, "mat-bad-r1.stl")));
+});
+
+test("no material -> filament_type null and note unchanged", async () => {
+  const r = await post(S.base, "/api/items/upload", stlOnly("mat-none", { note: "plain" }), auth);
+  const j = await r.json();
+  assert.equal(j.revision.filament_type, null);
+  assert.equal(j.revision.note, "plain");
+});
